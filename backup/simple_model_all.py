@@ -22,14 +22,15 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
+from datetime import datetime
 
 # ============================================
 # 1. MESH AND FUNCTION SPACES
 # ============================================
 # Create a 2D rectangular mesh (10m x 5m domain)
 # Use finer mesh for better resolution
-nx, ny = 80, 40  # Doubled resolution
-Lx, Ly = 10.0, 5.0
+nx, ny = 60, 30  # Doubled resolution
+Lx, Ly = 15.0, 5.0
 mesh = RectangleMesh(nx, ny, Lx, Ly)
 
 # Function space for pressure head
@@ -47,23 +48,31 @@ m = 1.0 - 1.0/n # van Genuchten m
 l_param = 0.5   # Pore connectivity parameter
 
 # Hydraulic parameters
-Ks = Constant(1e-6)  # Saturated hydraulic conductivity (m/s)
+Ks = Constant(1e-5)  # Saturated hydraulic conductivity (m/s)
 g = Constant(9.81)   # Gravity (m/s^2)
 
 # Numerical parameters
 epsilon = 0.01  # Smoothing parameter for transition at water table (m)
-kr_min = 1e-7   # Minimum relative permeability to avoid singularities
+kr_min = 1e-8   # Minimum relative permeability to avoid singularities
 
 # Time parameters
-dt = 30.0  # Time step (seconds)
-t_hours = 13
+dt = 60.0  # Time step (seconds)
+t_hours = 15
 t_end = t_hours * 3600 
 num_steps = int(t_end / dt)
 
+# ============================================
+# RAIN PARAMETERS (Updated)
+# ============================================
 # Rain event parameters
 rain_start = 10800.0  # Rain starts at 3 hours
-rain_end = rain_start + 7200.0    # Rain ends at 4 hours (1 hour duration)
-rain_pressure = 0.2   # Additional pressure head during rain (m)
+rain_end = rain_start + 3600.0  # Rain for 1 hour
+rain_head = 0.02  # 20mm ponding depth (m)
+atmospheric_pressure = -0.1  # Small suction outside rain zone (m)
+
+# Region of top boundary where rain is applied
+x_min_rain = 5.0
+x_max_rain = 8.0
 
 snapshot_times = [0, t_end/10, rain_start + 1800, rain_end + 7200, t_end*0.7, t_end]  # 0h, 2h, 3.5h, 4.5h, 7h, 10h
 
@@ -93,14 +102,29 @@ def calculate_theta(Hp):
 
 def calculate_Cm(Hp):
     """Calculate specific moisture capacity Cm with smoothing"""
+    Ss = 1e-4  # Specific storage coefficient (1/m) - typical for water
     if Hp >= epsilon:
-        return 1e-6  # Small value in saturated zone
+        # Saturated zone: use specific storage (water compressibility)
+        return Ss
     elif Hp <= -epsilon:
+        # Unsaturated zone: van Genuchten formula
         Se = calculate_Se(Hp)
-        return (alpha * m) / (1.0 - m) * (theta_s - theta_r) * Se**(1.0/m) * (1.0 - Se**(1.0/m))**m
+        # Cm = α * m * n * (θs - θr) * Se^(1/m) * (1 - Se^(1/m))^m
+        Cm_val = (alpha * m) / (1.0 - m) * (theta_s - theta_r) * Se**(1.0/m) * (1.0 - Se**(1.0/m))**m
+        return max(Ss, Cm_val)  # At least Ss to avoid numerical issues
     else:
-        # Smooth transition
-        return 1e-6
+        # Smooth transition zone: linear interpolation
+        # Calculate values at boundaries
+        Cm_sat = 1e-4  # Specific storage
+        
+        # Unsaturated value at -epsilon
+        Se_unsat = calculate_Se(-epsilon)
+        Cm_unsat = (alpha * m) / (1.0 - m) * (theta_s - theta_r) * Se_unsat**(1.0/m) * (1.0 - Se_unsat**(1.0/m))**m
+        
+        # Linear interpolation weight: 0 at Hp=-epsilon, 1 at Hp=+epsilon
+        weight = (Hp + epsilon) / (2.0 * epsilon)
+        
+        return Cm_unsat + (Cm_sat - Cm_unsat) * weight
 
 def calculate_kr(Hp):
     """Calculate relative permeability kr with bounds"""
@@ -186,25 +210,17 @@ def apply_boundary_conditions(t):
     """Apply boundary conditions based on current time"""
     bcs = []
     
-    # Left and right boundaries: Fixed water table with hydrostatic pressure
+    # Left and right boundaries: Hydrostatic pressure
     bc_left = DirichletBC(V, hydrostatic_bc, 1)
     bcs.append(bc_left)
     
     bc_right = DirichletBC(V, hydrostatic_bc, 2)
     bcs.append(bc_right)
     
-    # Bottom boundary: Apply hydrostatic pressure to avoid artifacts
-    # At y=0, pressure should be water_table_level - 0 = water_table_level
-    bc_bottom = DirichletBC(V, Constant(water_table_level), 3)
-    bcs.append(bc_bottom)
-    
-    # Top boundary (y=Ly): Rain event (time-dependent)
-    if rain_start <= t <= rain_end:
-        # During rain: apply positive pressure head
-        bc_top = DirichletBC(V, Constant(rain_pressure), 4)
-        bcs.append(bc_top)
-    # Otherwise, top is no-flow (natural BC)
-    
+    # Bottom boundary: Hydrostatic pressure
+    #bc_bottom = DirichletBC(V, Constant(water_table_level), 3)
+    #bcs.append(bc_bottom)
+
     return bcs
 
 # ============================================
@@ -242,20 +258,6 @@ for i, y in enumerate(y_coords):
         initial_pressure_array[i] = -(y - water_table_level) * 2.0
 
 p_n.dat.data[:] = initial_pressure_array
-
-# Initialize Cm and kr based on initial pressure
-Cm_n, kr_n = calculate_coefficients(p_n)
-
-# Weak form of Richards' equation with van Genuchten:
-# Cm * ∂Hp/∂t - ∇·(kr * Ks * ∇Hp) = 0
-# Time discretization: backward Euler
-# Evaluate Cm and kr at previous time step (Picard iteration)
-
-F = Cm_n * (p - p_n) / dt * q * dx + kr_n * Ks * dot(grad(p), grad(q)) * dx
-
-# Split into bilinear and linear forms
-a = lhs(F)
-L = rhs(F)
 
 # ============================================
 # 6. MONITORING POINTS
@@ -301,9 +303,31 @@ for step in range(num_steps):
     
     # Update boundary conditions
     bcs = apply_boundary_conditions(t)
-    
-    # Solve the system (reassemble with new coefficients)
-    F = Cm_n * (p - p_n) / dt * q * dx + kr_n * Ks * dot(grad(p), grad(q)) * dx
+
+    # Rainfall applied as flux [m/s] (positive means into domain)
+    rain_flux = Constant(0.0)
+    # 20 mm/hr = 20/1000/3600 m/s
+    rain_flux_value = 200.0 / 1000.0 / 3600.0
+
+    # Region of top boundary (x direction) where rain is applied
+    x_min_rain = 5.0
+    x_max_rain = 8.0
+
+    coords = SpatialCoordinate(mesh)
+
+    # Update flux magnitude/sign for this step
+    if rain_start <= t <= rain_end:
+        flux_expr = conditional(
+            And(coords[0] >= x_min_rain, coords[0] <= x_max_rain),
+            Constant(-rain_flux_value), Constant(0.0)
+        )
+    else:
+        flux_expr = Constant(0.0)
+
+    F = Cm_n * (p - p_n) / dt * q * dx \
+        + kr_n * Ks * dot(grad(p), grad(q)) * dx \
+        + flux_expr * q * ds(4)
+
     a = lhs(F)
     L = rhs(F)
     
@@ -348,7 +372,7 @@ rain_start_hr = rain_start / 3600.0
 rain_end_hr = rain_end / 3600.0
 
 # Create 3x3 grid figure
-fig = plt.figure(figsize=(16, 14))
+fig = plt.figure(figsize=(20, 10))
 gs = GridSpec(3, 3, figure=fig, hspace=0.35, wspace=0.35)
 
 # ============================================
@@ -487,7 +511,7 @@ cbar.ax.invert_yaxis()  # Invert: 0% at top, 100% at bottom
 # Add overall title
 fig.suptitle('Richards Equation: 10-Hour Rain Event Simulation\nPressure Response and Saturation Evolution', 
              fontsize=16, fontweight='bold', y=0.995)
-
-plt.savefig('richards_simulation.png', dpi=300, bbox_inches='tight')
-print("\nPlot saved as 'richards_simulation.png'")
+now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+plt.savefig(f'richards_simulation_{now}.png', dpi=300, bbox_inches='tight')
+print(f"\nPlot saved as f'richards_simulation_{now}.png'")
 
