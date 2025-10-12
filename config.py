@@ -29,14 +29,14 @@ class SimulationConfig:
     
     # Rain event parameters
     rain_start: float = 10800.0     # Rain starts at 3 hours (s)
-    rain_duration: float = 3600.0   # Rain lasts 1 hour (s)
+    rain_duration: float = 7200.0   # Rain lasts 1 hour (s)
     rain_flux: float = 200.0 / 1000.0 / 3600.0  # 200 mm/hr in m/s
     rain_x_min: float = 5.0         # Rain zone start (m)
     rain_x_max: float = 8.0         # Rain zone end (m)
     
     # Numerical parameters
     epsilon: float = 0.01       # Smoothing parameter near water table (m)
-    kr_min: float = 1e-8        # Minimum relative permeability
+    kr_min: float = 1e-6        # Minimum relative permeability
     Ss: float = 1e-4            # Specific storage coefficient (1/m)
     
     # Monitoring points

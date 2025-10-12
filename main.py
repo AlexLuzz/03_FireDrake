@@ -11,7 +11,11 @@ def main():
     # ==========================================
     # 1. CONFIGURATION
     # ==========================================
-    config = SimulationConfig()
+    config = SimulationConfig(
+        # You can modify config parameters here if needed
+        dt=1800,
+        t_end=3*86400,
+    )
     
     # ==========================================
     # 2. CREATE MESH AND FUNCTION SPACE
@@ -115,7 +119,7 @@ def main():
     # 6. CREATE SOLVER
     # ==========================================
     solver = RichardsSolver(mesh, V, domain, bc_manager, config)
-    
+        
     # ==========================================
     # 7. RUN SIMULATION
     # ==========================================

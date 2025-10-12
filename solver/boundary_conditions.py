@@ -1,5 +1,6 @@
 """
 Boundary condition management for Richards equation
+Matches COMSOL hydraulic head boundary condition: p = ρg(H₀ - D)
 """
 from firedrake import DirichletBC, Function, Constant, SpatialCoordinate, conditional, And
 import numpy as np
@@ -23,6 +24,8 @@ class BoundaryConditionManager:
     def _create_hydrostatic_profile(self):
         """
         Create hydrostatic pressure profile for boundaries
+        Equivalent to COMSOL: p = ρg(H₀ - D)
+        In pressure head form: Hp(y) = H₀ - y
         
         Returns:
             Function with hydrostatic pressure distribution
@@ -30,21 +33,20 @@ class BoundaryConditionManager:
         hydro_func = Function(self.V)
         coords = self.mesh.coordinates.dat.data
         y_coords = coords[:, 1]
-        water_table = self.config.initial_water_table
         
+        # H₀ is the hydraulic head (water table elevation)
+        H0 = self.config.initial_water_table
+        
+        # Pressure head: Hp = H₀ - y
         for i, y in enumerate(y_coords):
-            if y <= water_table:
-                # Below water table: positive hydrostatic pressure
-                hydro_func.dat.data[i] = water_table - y
-            else:
-                # Above water table: negative pressure (suction)
-                hydro_func.dat.data[i] = -(y - water_table) * 2.0
+            hydro_func.dat.data[i] = H0 - y
         
         return hydro_func
     
     def get_dirichlet_bcs(self, t: float) -> list:
         """
         Get Dirichlet boundary conditions for current time
+        Applies hydraulic head on left and right boundaries (COMSOL style)
         
         Args:
             t: Current time (seconds)
@@ -54,21 +56,19 @@ class BoundaryConditionManager:
         """
         bcs = []
         
-        # Left boundary (x=0): Hydrostatic
+        # Left boundary: Hydraulic head
         bc_left = DirichletBC(self.V, self.hydrostatic_profile, 1)
         bcs.append(bc_left)
         
-        # Right boundary (x=Lx): Hydrostatic
+        # Right boundary: Hydraulic head
         bc_right = DirichletBC(self.V, self.hydrostatic_profile, 2)
         bcs.append(bc_right)
         
-        # Bottom boundary (y=0): Can be hydrostatic or no-flow
-        # Currently commented out in original code, so we skip it
-        # bc_bottom = DirichletBC(self.V, Constant(self.config.initial_water_table), 3)
-        # bcs.append(bc_bottom)
-        
+        #bc_bottom = DirichletBC(self.V, Constant(self.config.initial_water_table), 3)
+        #bcs.append(bc_bottom)
+
         return bcs
-    
+
     def get_rain_flux_expression(self, t: float):
         """
         Get rain flux expression for current time
@@ -93,5 +93,5 @@ class BoundaryConditionManager:
         else:
             # No rain
             flux_expr = Constant(0.0)
-        
+
         return flux_expr

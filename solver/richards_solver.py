@@ -101,13 +101,14 @@ class RichardsSolver:
         # Update for next time step
         self.p_n.assign(self.p_new)
     
-    def run(self, probe_manager=None, snapshot_manager=None):
+    def run(self, probe_manager=None, snapshot_manager=None, print_diagnostics=False):
         """
         Run full simulation
         
         Args:
             probe_manager: ProbeManager for time series (optional)
             snapshot_manager: SnapshotManager for spatial data (optional)
+            print_diagnostics: Print detailed diagnostics every hour (optional)
         """
         print("Starting simulation...")
         print(f"Domain: {self.config.Lx}m x {self.config.Ly}m")
@@ -119,6 +120,11 @@ class RichardsSolver:
         print(f"  VG params: α={self.domain.default_material.hydraulic_model.params.alpha}, "
               f"n={self.domain.default_material.hydraulic_model.params.n}")
         print()
+        
+        # Track mass balance
+        if print_diagnostics:
+            initial_water = self.compute_total_water_content()
+            print(f"Initial total water: {initial_water:.3f} m³\n")
         
         t = 0.0
         for step in range(self.config.num_steps):
@@ -139,9 +145,57 @@ class RichardsSolver:
             # Print progress every hour
             if step % int(3600/self.config.dt) == 0:
                 print(f"Time: {t/3600:.1f}h / {self.config.t_end/3600:.1f}h")
+                
+                # Detailed diagnostics if requested
+                if print_diagnostics:
+                    self.print_diagnostics(t)
+                    print()
         
         print("\nSimulation complete!")
+        
+        if print_diagnostics:
+            print("\nFinal diagnostics:")
+            self.print_diagnostics(t)
     
     def get_current_solution(self):
         """Get current pressure solution"""
         return self.p_new
+    
+    def compute_total_water_content(self):
+        """
+        Compute total water in domain (for mass balance checks)
+        
+        Returns:
+            Total water content (m³)
+        """
+        coords = self.mesh.coordinates.dat.data
+        p_vals = self.p_new.dat.data[:]
+        
+        total_theta = 0.0
+        for i, (x, y) in enumerate(coords):
+            Hp = p_vals[i]
+            material = self.domain.get_material_at_point(x, y)
+            theta = material.water_content(Hp)
+            total_theta += theta
+        
+        # Approximate volume per node
+        dx = self.config.dx
+        dy = self.config.dy
+        volume_per_node = dx * dy
+        
+        return total_theta * volume_per_node
+    
+    def print_diagnostics(self, t: float):
+        """Print diagnostic information"""
+        p_vals = self.p_new.dat.data[:]
+        print(f"  Pressure range: [{p_vals.min():.4f}, {p_vals.max():.4f}] m")
+        print(f"  Mean pressure: {p_vals.mean():.4f} m")
+        
+        # Count saturated nodes
+        saturated = np.sum(p_vals > -self.config.epsilon)
+        total = len(p_vals)
+        print(f"  Saturated nodes: {saturated}/{total} ({100*saturated/total:.1f}%)")
+        
+        # Total water
+        total_water = self.compute_total_water_content()
+        print(f"  Total water: {total_water:.3f} m³")

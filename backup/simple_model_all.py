@@ -319,10 +319,11 @@ for step in range(num_steps):
     if rain_start <= t <= rain_end:
         flux_expr = conditional(
             And(coords[0] >= x_min_rain, coords[0] <= x_max_rain),
-            Constant(-rain_flux_value), Constant(0.0)
+            Constant(-rain_flux_value).as_ufl(), 
+            Constant(0.0).as_ufl()
         )
     else:
-        flux_expr = Constant(0.0)
+        flux_expr = Constant(0.0).as_ufl()
 
     F = Cm_n * (p - p_n) / dt * q * dx \
         + kr_n * Ks * dot(grad(p), grad(q)) * dx \
@@ -512,6 +513,6 @@ cbar.ax.invert_yaxis()  # Invert: 0% at top, 100% at bottom
 fig.suptitle('Richards Equation: 10-Hour Rain Event Simulation\nPressure Response and Saturation Evolution', 
              fontsize=16, fontweight='bold', y=0.995)
 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-plt.savefig(f'richards_simulation_{now}.png', dpi=300, bbox_inches='tight')
+plt.savefig(f'results/richards_simulation_{now}.png', dpi=300, bbox_inches='tight')
 print(f"\nPlot saved as f'richards_simulation_{now}.png'")
 
