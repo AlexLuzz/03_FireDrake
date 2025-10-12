@@ -319,10 +319,11 @@ for step in range(num_steps):
     if rain_start <= t <= rain_end:
         flux_expr = conditional(
             And(coords[0] >= x_min_rain, coords[0] <= x_max_rain),
-            Constant(-rain_flux_value), Constant(0.0)
+            Constant(-rain_flux_value).as_ufl(), 
+            Constant(0.0).as_ufl()
         )
     else:
-        flux_expr = Constant(0.0)
+        flux_expr = Constant(0.0).as_ufl()
 
     F = Cm_n * (p - p_n) / dt * q * dx \
         + kr_n * Ks * dot(grad(p), grad(q)) * dx \
