@@ -13,96 +13,42 @@ def main():
     # ==========================================
     config = SimulationConfig(
         # You can modify config parameters here if needed
-        dt=1800,
-        t_end=3*86400,
+        dt=600,
+        t_end=24*3600,
     )
-    
     # ==========================================
-    # 2. CREATE MESH AND FUNCTION SPACE
+    # 2. DEFINE RAIN SCENARIO
     # ==========================================
-    mesh = RectangleMesh(config.nx, config.ny, config.Lx, config.Ly)
-    V = FunctionSpace(mesh, "CG", 1)
+    rain_zones = [
+        RainZone(x_min=0.0, x_max=8.0, multiplier=1.0, name="grass"),
+        RainZone(x_min=9.0, x_max=11.0, multiplier=6.0, name="green_infrastructure"),
+    ]
+    rain_scenario = RainScenario.single_event(
+        start_hours=3.0,
+        end_hours=5.0,
+        intensity_mm_hr=20.0,
+        zones=rain_zones
+    )
 
     # ==========================================
-    # 3. CREATE SOIL MATERIALS
+    # 3. CREATE MESH WITH MATERIALS
     # ==========================================
+    till = SoilMaterial.from_curves(name="Till")
+    terreau = SoilMaterial.from_curves(name="Terreau")
+
+    mesh = RectangleMesh(80, 40, 20.0, 5.0)
     
-    # OPTION 1: Single homogeneous soil (original behavior)
-    # ----------------------------------------------------
-    soil = SoilMaterial.create_default(
-        epsilon=config.epsilon,
-        kr_min=config.kr_min,
-        Ss=config.Ss
+    # Create domain with Till as base material
+    domain = Domain.homogeneous(mesh, till)
+    
+    domain.add_rectangle(
+        material=terreau,
+        x_min=9.0, x_max=11.0,
+        y_min=4.0, y_max=5.0,
+        name="green_infrastructure"
     )
-    domain = Domain.homogeneous(mesh, soil)
-    
-    # OPTION 2: Two horizontal layers (dirt on top, till below)
-    # ----------------------------------------------------------
-    # dirt = SoilMaterial.create_default(
-    #     epsilon=config.epsilon, kr_min=config.kr_min, Ss=config.Ss
-    # )
-    # till = SoilMaterial.create_sandy_loam(
-    #     epsilon=config.epsilon, kr_min=config.kr_min, Ss=config.Ss
-    # )
-    # domain = Domain.two_layer(mesh, dirt, till, interface_y=2.5)
-    
-    # OPTION 3: Multiple horizontal layers
-    # -------------------------------------
-    # from physics.van_genuchten import VanGenuchtenParams, VanGenuchtenModel
-    # 
-    # # Create custom materials
-    # gravel_params = VanGenuchtenParams(theta_r=0.02, theta_s=0.35, alpha=5.0, n=2.5)
-    # gravel_model = VanGenuchtenModel(gravel_params, epsilon=config.epsilon)
-    # gravel = SoilMaterial("Gravel", gravel_model, Ks=1e-4)
-    # 
-    # till = SoilMaterial.create_sandy_loam(...)
-    # dirt = SoilMaterial.create_default(...)
-    # 
-    # domain = Domain.horizontal_layers(mesh, [
-    #     (gravel, 1.0),  # 0-1m: gravel base
-    #     (till, 2.0),    # 1-3m: till
-    #     (dirt, 2.0)     # 3-5m: dirt/topsoil
-    # ])
-    
-    # OPTION 4: Left-right split (vertical interface)
-    # ------------------------------------------------
-    # till = SoilMaterial.create_sandy_loam(...)
-    # dirt = SoilMaterial.create_default(...)
-    # domain = Domain.left_right_split(mesh, till, dirt, interface_x=7.5)
-    
-    # OPTION 5: Add geometric features to base layer
-    # -----------------------------------------------
-    # sand = SoilMaterial.create_default(...)
-    # clay = SoilMaterial.create_clay(...)
-    # 
-    # domain = Domain.homogeneous(mesh, sand)
-    # # Add clay lens in the middle
-    # domain.add_box(clay, x_min=5, x_max=10, y_min=1.5, y_max=2.5, name="clay_lens")
-    # # Add circular inclusion
-    # domain.add_circle(clay, center_x=12, center_y=3, radius=0.8, name="clay_pocket")
-    
-    # OPTION 6: Custom polygonal regions (MOST FLEXIBLE!)
-    # ---------------------------------------------------
-    # Define any shape with polygon vertices
-    # soil = SoilMaterial.create_default(...)
-    # domain = Domain.homogeneous(mesh, soil)
-    # 
-    # # Example: L-shaped region
-    # vertices = [(0,0), (10,0), (10,3), (5,3), (5,5), (0,5)]
-    # domain.add_polygon(soil, vertices, name="L_shape")
-    # 
-    # # Example: Notched rectangle (like complex geometry)
-    # vertices = [
-    #     (0, 0), (22, 0), (22, 5), (11, 5),
-    #     (11, 4.3), (10, 4.3), (10, 5), (0, 5)
-    # ]
-    # domain.add_polygon(soil, vertices, name="notched_rectangle")
-    
-    # Print domain summary
-    domain.print_summary()
-    
-    # Optional: Visualize material distribution
-    # domain.visualize_materials(V, save_path=config.output_dir / "material_map.png")
+
+    V = FunctionSpace(mesh, "CG", 1)
     
     # ==========================================
     # 4. CREATE BOUNDARY CONDITION MANAGER
@@ -113,17 +59,27 @@ def main():
     # 5. CREATE MONITORING
     # ==========================================
     probe_manager = ProbeManager(config.monitor_points)
-    snapshot_manager = SnapshotManager(config.snapshot_times, domain)
+    
+    # Define 6 snapshot times (in seconds)
+    snapshot_times = [
+        0.0,
+        3*3600.0,   # Before rain
+        4*3600.0,   # During rain
+        5*3600.0,   # End of rain
+        8*3600.0,   # After rain
+        24*3600.0   # End of simulation
+    ]
+    snapshot_manager = SnapshotManager(snapshot_times, domain)
     
     # ==========================================
     # 6. CREATE SOLVER
     # ==========================================
-    solver = RichardsSolver(mesh, V, domain, bc_manager, config)
+    solver = RichardsSolver(mesh, V, domain, rain_scenario, bc_manager, config)
         
     # ==========================================
     # 7. RUN SIMULATION
     # ==========================================
-    solver.run(probe_manager=probe_manager, snapshot_manager=snapshot_manager)
+    solver.run(probe_manager, snapshot_manager)
     
     # ==========================================
     # 8. VISUALIZE RESULTS

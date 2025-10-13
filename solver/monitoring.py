@@ -4,31 +4,33 @@ Monitoring utilities for time series and spatial snapshots
 import numpy as np
 
 class ProbeManager:
-    """Manages point probes for time series monitoring"""
+    """Manages pressure monitoring at specific points"""
     
-    def __init__(self, points: list):
+    def __init__(self, points):
         """
         Initialize probe manager
         
         Args:
-            points: List of tuples (x, y, name) for monitoring points
+            points: List of (x, y, name) tuples
         """
         self.points = points
-        self.time_series = {name: [] for _, _, name in points}
+        self.data = {name: [] for _, _, name in points}
         self.times = []
     
-    def record(self, t: float, solution):
-        """
-        Record solution values at monitoring points
-        
-        Args:
-            t: Current time
-            solution: Firedrake Function with solution
-        """
+    def record(self, t, pressure_function):
+        """Record pressure at all probe locations"""
         self.times.append(t)
         for x, y, name in self.points:
-            value = solution.at([x, y])
-            self.time_series[name].append(value)
+            try:
+                p_val = pressure_function.at([x, y])
+                # Water table elevation = sensor elevation + pressure head
+                # If p > 0: water table is above sensor (saturated/ponded)
+                # If p < 0: water table is below sensor (unsaturated)
+                # If p = 0: water table is exactly at sensor elevation
+                water_table_elevation = y + p_val
+                self.data[name].append(water_table_elevation)
+            except:
+                self.data[name].append(float('nan'))
     
     def get_data(self):
         """
@@ -39,7 +41,7 @@ class ProbeManager:
         """
         return {
             'times': np.array(self.times),
-            'data': self.time_series
+            'data': self.data
         }
     
     def get_time_hours(self):

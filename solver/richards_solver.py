@@ -1,8 +1,7 @@
 """
 Main Richards equation solver
 """
-from firedrake import (Function, TrialFunction, TestFunction, 
-                       Constant, dx, ds, grad, dot, lhs, rhs, solve)
+from firedrake import *
 import numpy as np
 
 class RichardsSolver:
@@ -10,8 +9,8 @@ class RichardsSolver:
     Richards equation solver using Firedrake
     Implements: Cm * ∂Hp/∂t - ∇·(kr * Ks * ∇Hp) = rain_flux
     """
-    
-    def __init__(self, mesh, V, domain, bc_manager, config):
+
+    def __init__(self, mesh, V, domain, rain_scenario, bc_manager, config):
         """
         Initialize solver
         
@@ -25,6 +24,7 @@ class RichardsSolver:
         self.mesh = mesh
         self.V = V
         self.domain = domain
+        self.rain_scenario = rain_scenario
         self.bc_manager = bc_manager
         self.config = config
         
@@ -36,8 +36,8 @@ class RichardsSolver:
         self.Cm_n = Function(V, name="Moisture_capacity")
         self.kr_n = Function(V, name="Relative_permeability")
         
-        # Ks as Firedrake constant
-        self.Ks = Constant(domain.default_material.Ks)
+        # Ks field (spatially varying for heterogeneous domains)
+        self.Ks_field = domain.compute_Ks_field(V)
         
         # Initialize
         self._set_initial_conditions()
@@ -50,12 +50,8 @@ class RichardsSolver:
         
         initial_pressure = np.zeros(len(y_coords))
         for i, y in enumerate(y_coords):
-            if y <= water_table:
-                # Below water table: positive hydrostatic pressure
-                initial_pressure[i] = water_table - y
-            else:
-                # Above water table: negative pressure (suction)
-                initial_pressure[i] = -(y - water_table) * 2.0
+            # True hydrostatic equilibrium: p = z_wt - z
+            initial_pressure[i] = water_table - y
         
         self.p_n.dat.data[:] = initial_pressure
         
@@ -66,12 +62,47 @@ class RichardsSolver:
         """Update Cm and kr based on current pressure"""
         self.Cm_n, self.kr_n = self.domain.compute_coefficient_fields(self.p_n)
     
-    def solve_timestep(self, t: float):
+    def get_rain_flux_expression(self, t: float):
+        """
+        Get spatially-varying rain flux expression for current time
+        Rain is applied as Neumann BC (flux) on top boundary
+        
+        Args:
+            t: Current time (seconds)
+        
+        Returns:
+            UFL expression for rain flux (m/s, negative = into domain)
+        """        
+        t_hours = t / 3600.0
+        coords = SpatialCoordinate(self.mesh)
+        x = coords[0]
+        
+        # Build piecewise expression for all zones
+        flux_expr = Constant(0.0)
+        
+        for event in self.rain_scenario.events:
+            if event.is_active(t_hours):
+                # Event is active - check each zone
+                for zone in event.zones:
+                    # Calculate flux for this zone
+                    zone_flux = event.intensity * zone.multiplier / 3600000.0  # mm/hr to m/s
+                    
+                    # Add contribution if x is in zone
+                    flux_expr = conditional(
+                        And(x >= zone.x_min, x <= zone.x_max),
+                        Constant(-zone_flux),  # Negative = into domain
+                        flux_expr  # Keep previous value if not in zone
+                    )
+        
+        return flux_expr
+
+    def solve_timestep(self, t: float, bcs=None):
         """
         Solve one time step
         
         Args:
             t: Current time (seconds)
+            bcs: Dirichlet boundary conditions (optional)
         """
         # Update coefficients from previous solution
         self._update_coefficients()
@@ -80,15 +111,24 @@ class RichardsSolver:
         bcs = self.bc_manager.get_dirichlet_bcs(t)
         
         # Get rain flux expression
-        rain_flux = self.bc_manager.get_rain_flux_expression(t)
+        rain_flux = self.get_rain_flux_expression(t)
         
         # Define variational problem
         p = TrialFunction(self.V)
         q = TestFunction(self.V)
         
-        # Weak form: Cm*(p-p_n)/dt + kr*Ks*∇p·∇q + flux*q on boundary
+        # Compute K field (K = kr * Ks)
+        K_field = self.kr_n * self.Ks_field
+
+        # Gravity vector (vertical direction)
+        gravity = as_vector([0, 1])
+        
+        # Weak form with GRAVITY term:
+        # Cm*(p-p_n)/dt + K*∇p·∇q + K*∇z·∇q = rain_flux*q
+        # where ∇z·∇q = ∂q/∂y (vertical derivative)
         F = (self.Cm_n * (p - self.p_n) / self.config.dt * q * dx +
-             self.kr_n * self.Ks * dot(grad(p), grad(q)) * dx +
+             K_field * dot(grad(p), grad(q)) * dx +
+             K_field * dot(gravity, grad(q)) * dx +
              rain_flux * q * ds(4))  # ds(4) is top boundary
         
         a = lhs(F)
@@ -113,18 +153,7 @@ class RichardsSolver:
         print("Starting simulation...")
         print(f"Domain: {self.config.Lx}m x {self.config.Ly}m")
         print(f"Mesh: {self.config.nx} x {self.config.ny} elements")
-        print(f"Time: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
-        print(f"Rain event: {self.config.rain_start/3600:.1f}h to {self.config.rain_end/3600:.1f}h")
-        print(f"Material: {self.domain.default_material.name}")
-        print(f"  Ks = {self.domain.default_material.Ks:.2e} m/s")
-        print(f"  VG params: α={self.domain.default_material.hydraulic_model.params.alpha}, "
-              f"n={self.domain.default_material.hydraulic_model.params.n}")
-        print()
-        
-        # Track mass balance
-        if print_diagnostics:
-            initial_water = self.compute_total_water_content()
-            print(f"Initial total water: {initial_water:.3f} m³\n")
+        print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
         
         t = 0.0
         for step in range(self.config.num_steps):
@@ -152,14 +181,6 @@ class RichardsSolver:
                     print()
         
         print("\nSimulation complete!")
-        
-        if print_diagnostics:
-            print("\nFinal diagnostics:")
-            self.print_diagnostics(t)
-    
-    def get_current_solution(self):
-        """Get current pressure solution"""
-        return self.p_new
     
     def compute_total_water_content(self):
         """
@@ -192,7 +213,7 @@ class RichardsSolver:
         print(f"  Mean pressure: {p_vals.mean():.4f} m")
         
         # Count saturated nodes
-        saturated = np.sum(p_vals > -self.config.epsilon)
+        saturated = np.sum(p_vals > 0)
         total = len(p_vals)
         print(f"  Saturated nodes: {saturated}/{total} ({100*saturated/total:.1f}%)")
         

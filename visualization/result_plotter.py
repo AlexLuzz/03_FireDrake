@@ -66,9 +66,10 @@ class ResultsPlotter:
         
         # Plot each probe
         for idx, (name, data) in enumerate(time_series.items()):
+            marker_every = max(1, int(len(times_hours) / 50))
             ax.plot(times_hours, data, color=colors[idx], 
                    linewidth=2.5, label=name, marker='o', markersize=2,
-                   markevery=int(len(times_hours)/50))
+                   markevery=marker_every)
         
         # Rain event shading
         rain_start_hr = self.config.rain_start / 3600.0
@@ -77,16 +78,17 @@ class ResultsPlotter:
                   color='skyblue', label='Rain event', zorder=0)
         
         # Water table reference
-        ax.axhline(y=0, color='cyan', linestyle='--', linewidth=2,
-                  label='Water table (p=0)', alpha=0.7)
+        ax.axhline(y=2.0, color='cyan', linestyle='--', linewidth=2, 
+                  label='Initial water table', alpha=0.7)
         
         # Formatting
+        ax.set_ylabel('Water table elevation (m)', fontsize=12, fontweight='bold')
         ax.set_xlabel('Time (hours)', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Pressure head (m)', fontsize=12, fontweight='bold')
-        ax.set_title('Pressure Response to Rain Event at Different Vertical Positions',
+        ax.set_title('Water Level Sensor Readings (Water Table Elevation)', 
                     fontsize=14, fontweight='bold', pad=15)
-        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.8)
-        ax.legend(loc='best', fontsize=10, framealpha=0.9, edgecolor='black')
+        ax.legend(loc='upper right', fontsize=10, framealpha=0.9)
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim([0, 5])  # Show full domain height
         
         # Statistics box
         stats_lines = []

@@ -2,8 +2,8 @@
 Domain management for spatially variable soil properties
 Smart constructors for common multi-material scenarios
 """
-from firedrake import Function
 import numpy as np
+from firedrake import Function
 
 class Domain:
     """
@@ -44,29 +44,6 @@ class Domain:
         return cls(mesh, material)
     
     @classmethod
-    def two_layer(cls, mesh, top_material, bottom_material, interface_y):
-        """
-        Two horizontal layers separated at given y coordinate
-        
-        Args:
-            mesh: Firedrake mesh
-            top_material: SoilMaterial for y > interface_y
-            bottom_material: SoilMaterial for y < interface_y
-            interface_y: Height of interface (m)
-        
-        Example:
-            # Dirt on top, till below
-            domain = Domain.two_layer(mesh, dirt, till, interface_y=2.5)
-        """
-        domain = cls(mesh, top_material)
-        domain.add_material_region(
-            bottom_material, 
-            lambda x, y: y < interface_y,
-            name="bottom_layer"
-        )
-        return domain
-    
-    @classmethod
     def horizontal_layers(cls, mesh, layers):
         """
         Multiple horizontal layers from bottom to top
@@ -100,29 +77,6 @@ class Domain:
             )
             y_bottom = y_top
         
-        return domain
-    
-    @classmethod
-    def left_right_split(cls, mesh, left_material, right_material, interface_x):
-        """
-        Vertical interface splitting domain left/right
-        
-        Args:
-            mesh: Firedrake mesh
-            left_material: Material for x < interface_x
-            right_material: Material for x > interface_x
-            interface_x: Position of vertical interface (m)
-        
-        Example:
-            # Till on left, dirt on right
-            domain = Domain.left_right_split(mesh, till, dirt, interface_x=7.5)
-        """
-        domain = cls(mesh, right_material)
-        domain.add_material_region(
-            left_material,
-            lambda x, y: x < interface_x,
-            name="left_zone"
-        )
         return domain
     
     @classmethod
@@ -221,6 +175,26 @@ class Domain:
         return self
     
     # ==========================================
+    # RECTANGLE HELPER (convenience method)
+    # ==========================================
+    
+    def add_rectangle(self, material, x_min, x_max, y_min, y_max, name=None):
+        """
+        Add rectangular material region (convenience method)
+        
+        Args:
+            material: SoilMaterial object
+            x_min, x_max: x-coordinate bounds
+            y_min, y_max: y-coordinate bounds
+            name: Optional name for this region
+        """
+        def in_rectangle(x, y):
+            return x_min <= x <= x_max and y_min <= y <= y_max
+        
+        self.add_material_region(material, in_rectangle, name=name or "rectangle")
+        return self
+    
+    # ==========================================
     # LOW-LEVEL INTERFACE
     # ==========================================
     
@@ -268,71 +242,16 @@ class Domain:
         self.material_cache[cache_key] = material
         return material
     
-    def visualize_materials(self, V, save_path=None):
+    def compute_coefficient_fields(self, pressure_field):
         """
-        Create a visualization of the material distribution
+        Compute Cm and kr fields from pressure field
         
         Args:
-            V: Function space for visualization
-            save_path: Optional path to save figure
+            pressure_field: Firedrake Function containing pressure head values
         
         Returns:
-            matplotlib figure
+            Tuple of (Cm_field, kr_field) as Firedrake Functions
         """
-        import matplotlib.pyplot as plt
-        from matplotlib.colors import ListedColormap
-        
-        # Create material ID field
-        coords = self.mesh.coordinates.dat.data
-        material_ids = np.zeros(len(coords))
-        
-        # Get unique materials and assign IDs
-        unique_materials = [self.default_material]
-        for data in self.materials.values():
-            mat = data['material']
-            if mat not in unique_materials:
-                unique_materials.append(mat)
-        
-        material_to_id = {mat: i for i, mat in enumerate(unique_materials)}
-        
-        # Assign IDs at each point
-        for i, (x, y) in enumerate(coords):
-            mat = self.get_material_at_point(x, y)
-            material_ids[i] = material_to_id[mat]
-        
-        # Plot
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        x = coords[:, 0]
-        y = coords[:, 1]
-        
-        # Create colormap
-        colors = plt.cm.tab10(np.linspace(0, 1, len(unique_materials)))
-        cmap = ListedColormap(colors)
-        
-        scatter = ax.scatter(x, y, c=material_ids, cmap=cmap, s=20, 
-                           vmin=-0.5, vmax=len(unique_materials)-0.5)
-        
-        # Add colorbar with material names
-        cbar = plt.colorbar(scatter, ax=ax, ticks=range(len(unique_materials)))
-        cbar.set_ticklabels([mat.name for mat in unique_materials])
-        
-        ax.set_xlabel('x (m)')
-        ax.set_ylabel('y (m)')
-        ax.set_title('Material Distribution')
-        ax.set_aspect('equal')
-        
-        if save_path:
-            plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        
-        return fig
-    
-    # ==========================================
-    # COMPUTATION METHODS (unchanged)
-    # ==========================================
-    
-    def compute_coefficient_fields(self, pressure_field):
-        """Compute Cm and kr fields from pressure field"""
         V = pressure_field.function_space()
         Cm_field = Function(V)
         kr_field = Function(V)
@@ -342,7 +261,7 @@ class Domain:
         
         if self.is_homogeneous:
             # Fast path for homogeneous domain
-            Cm_vals, kr_vals, K_vals = self.default_material.compute_fields(p_vals)
+            Cm_vals, kr_vals = self.default_material.hydraulic_model.compute_fields(p_vals)
             Cm_field.dat.data[:] = Cm_vals
             kr_field.dat.data[:] = kr_vals
         else:
@@ -361,8 +280,44 @@ class Domain:
         
         return Cm_field, kr_field
     
+    def compute_Ks_field(self, V):
+        """
+        Compute spatially varying Ks field
+        
+        Args:
+            V: Function space
+        
+        Returns:
+            Ks_field as Firedrake Function
+        """
+        Ks_field = Function(V)
+        
+        if self.is_homogeneous:
+            # Uniform Ks
+            Ks_field.dat.data[:] = self.default_material.Ks
+        else:
+            # Heterogeneous Ks
+            coords = self.mesh.coordinates.dat.data
+            Ks_vals = np.zeros(len(coords))
+            
+            for i, (x, y) in enumerate(coords):
+                material = self.get_material_at_point(x, y)
+                Ks_vals[i] = material.Ks
+            
+            Ks_field.dat.data[:] = Ks_vals
+        
+        return Ks_field
+
     def compute_saturation_field(self, pressure_field):
-        """Compute saturation field from pressure field"""
+        """
+        Compute saturation field from pressure field
+        
+        Args:
+            pressure_field: Firedrake Function containing pressure head values
+        
+        Returns:
+            S_field as Firedrake Function (saturation 0-1)
+        """
         V = pressure_field.function_space()
         S_field = Function(V)
         
@@ -374,19 +329,151 @@ class Domain:
             Hp = p_vals[i]
             material = self.get_material_at_point(x, y)
             theta = material.water_content(Hp)
-            S_vals[i] = max(material.theta_r/material.theta_s, 
-                           min(theta / material.theta_s, 1.0))
+            # Saturation = (θ - θr) / (θs - θr), clipped to [0, 1]
+            S_vals[i] = max(0.0, min(1.0, 
+                (theta - material.hydraulic_model.theta_r) / 
+                (material.hydraulic_model.theta_s - material.hydraulic_model.theta_r)))
         
         S_field.dat.data[:] = S_vals
         return S_field
+
+    def visualize_materials(self, V, save_path=None):
+        """
+        Create a visualization of the material distribution
+        
+        Args:
+            V: Function space for visualization
+            save_path: Optional path to save figure
+        
+        Returns:
+            matplotlib figure
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.tri as tri
+        from matplotlib.colors import ListedColormap
+        from matplotlib.patches import Patch
+        
+        # Get mesh data
+        coords = self.mesh.coordinates.dat.data
+        cells = self.mesh.coordinates.cell_node_map().values
+        
+        # Get unique materials and assign IDs
+        unique_materials = [self.default_material]
+        for data in self.materials.values():
+            mat = data['material']
+            if mat not in unique_materials:
+                unique_materials.append(mat)
+        
+        material_to_id = {mat: i for i, mat in enumerate(unique_materials)}
+        
+        # Assign material IDs per cell (not per vertex) to avoid artifacts
+        material_ids = np.zeros(len(cells))
+        for i, cell in enumerate(cells):
+            # Get cell centroid
+            cell_coords = coords[cell]
+            centroid_x = np.mean(cell_coords[:, 0])
+            centroid_y = np.mean(cell_coords[:, 1])
+            
+            # Assign material at centroid
+            mat = self.get_material_at_point(centroid_x, centroid_y)
+            material_ids[i] = material_to_id[mat]
+        
+        # Create triangulation
+        x = coords[:, 0]
+        y = coords[:, 1]
+        triangulation = tri.Triangulation(x, y, cells)
+        
+        # Plot
+        fig, ax = plt.subplots(figsize=(14, 6))
+        
+        # Create colormap with distinct colors
+        colors = ['#8B4513', '#2E8B57']  # Brown for till, green for terreau
+        cmap = ListedColormap(colors[:len(unique_materials)])
+        
+        # Use tripcolor for proper mesh visualization with transparency
+        tpc = ax.tripcolor(triangulation, facecolors=material_ids, cmap=cmap, 
+                          vmin=-0.5, vmax=len(unique_materials)-0.5,
+                          edgecolors='none', alpha=0.7)
+        
+        # Create legend handles for materials
+        legend_elements = [
+            Patch(facecolor=colors[i], alpha=0.7, edgecolor='black', 
+                  label=mat.name)
+            for i, mat in enumerate(unique_materials)
+        ]
+        
+        # Add water table line
+        legend_elements.append(
+            plt.Line2D([0], [0], color='blue', linestyle='--', linewidth=2,
+                      label='Water Table (1.5m)')
+        )
+        
+        ax.axhline(y=1.5, color='blue', linestyle='--', linewidth=2, alpha=0.7)
+        
+        # Add green infrastructure outline
+        if len(unique_materials) > 1:
+            from matplotlib.patches import Rectangle
+            rect = Rectangle((9, 4), 2, 1, linewidth=2, edgecolor='darkgreen', 
+                           facecolor='none', linestyle='-')
+            ax.add_patch(rect)
+            legend_elements.append(
+                plt.Line2D([0], [0], color='darkgreen', linewidth=2,
+                          label='Green Infrastructure')
+            )
+        
+        ax.set_xlabel('x (m)', fontsize=12)
+        ax.set_ylabel('y (m)', fontsize=12)
+        ax.set_title('Material Distribution - Project Domain', fontsize=14, fontweight='bold')
+        ax.set_aspect('equal')
+        ax.legend(handles=legend_elements, fontsize=10, loc='upper right')
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim([0, 20])
+        ax.set_ylim([0, 5])
+        
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        
+        return fig
+
+if __name__ == "__main__":
+    from firedrake import RectangleMesh, FunctionSpace
+    import matplotlib.pyplot as plt
+    from .materials import SoilMaterial
+
+    till = SoilMaterial.from_curves(name="Till")
+
+    terreau = SoilMaterial.from_curves(name="Terreau")
     
-    def print_summary(self):
-        """Print summary of domain configuration"""
-        print("Domain Configuration:")
-        print(f"  Default material: {self.default_material.name}")
-        if self.is_homogeneous:
-            print("  Homogeneous domain")
-        else:
-            print(f"  Heterogeneous domain with {len(self.materials)} region(s):")
-            for name, data in self.materials.items():
-                print(f"    - {name}: {data['material'].name}")
+    # Create rectangular mesh: 20m wide, 5m high
+    mesh = RectangleMesh(100, 25, 20.0, 5.0)
+    
+    # Create domain with Till as base material
+    domain = Domain.homogeneous(mesh, till)
+    
+    domain.add_rectangle(
+        material=terreau,
+        x_min=9.0, x_max=11.0,
+        y_min=4.0, y_max=5.0,
+        name="green_infrastructure"
+    )
+    
+    V = FunctionSpace(mesh, "CG", 1)
+    fig = domain.visualize_materials(V, 
+                                     #save_path='domain_configuration.png'
+                                     )
+        
+    # Add annotations to explain the setup
+    ax = fig.axes[0]
+    ax.text(10, 0.5, 'SATURATED\nZONE', 
+           ha='center', va='center', fontsize=11, 
+           bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
+    ax.text(10, 3.0, 'UNSATURATED\nZONE', 
+           ha='center', va='center', fontsize=11,
+           bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7))
+    ax.text(10, 4.5, 'GI', 
+           ha='center', va='center', fontsize=10, fontweight='bold',
+           color='white',
+           bbox=dict(boxstyle='round', facecolor='darkgreen', alpha=0.8))
+    
+    plt.savefig('domain_configuration_annotated.png', dpi=150, bbox_inches='tight')
+    

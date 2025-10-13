@@ -58,40 +58,13 @@ class BoundaryConditionManager:
         
         # Left boundary: Hydraulic head
         bc_left = DirichletBC(self.V, self.hydrostatic_profile, 1)
-        bcs.append(bc_left)
+        #bcs.append(bc_left)
         
         # Right boundary: Hydraulic head
         bc_right = DirichletBC(self.V, self.hydrostatic_profile, 2)
-        bcs.append(bc_right)
+        #bcs.append(bc_right)
         
-        #bc_bottom = DirichletBC(self.V, Constant(self.config.initial_water_table), 3)
+        bc_bottom = DirichletBC(self.V, Constant(0), 3)
         #bcs.append(bc_bottom)
 
         return bcs
-
-    def get_rain_flux_expression(self, t: float):
-        """
-        Get rain flux expression for current time
-        Rain is applied as Neumann BC (flux) on top boundary
-        
-        Args:
-            t: Current time (seconds)
-        
-        Returns:
-            UFL expression for rain flux
-        """
-        coords = SpatialCoordinate(self.mesh)
-        
-        if self.config.rain_start <= t <= self.config.rain_end:
-            # Rain is active - apply flux in specified region
-            flux_expr = conditional(
-                And(coords[0] >= self.config.rain_x_min, 
-                    coords[0] <= self.config.rain_x_max),
-                Constant(-self.config.rain_flux),  # Negative = into domain
-                Constant(0.0)
-            )
-        else:
-            # No rain
-            flux_expr = Constant(0.0)
-
-        return flux_expr
