@@ -27,7 +27,7 @@ class SimulationConfig:
     
     # Physical parameters (not soil-specific)
     g: float = 9.81             # Gravity (m/s^2)
-    initial_water_table: float = 1.5  # Initial water table height (m)
+    initial_water_table: float = 1.2  # Initial water table height (m)
     
     # Numerical parameters
     epsilon: float = 0.05     # Smoothing parameter near water table (m)

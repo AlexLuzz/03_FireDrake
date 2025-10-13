@@ -32,11 +32,12 @@ def main():
 
     rain_scenario_csv = RainScenario.from_csv(
         "RAF_rain_short.csv",
-        time_col="day",
-        rain_col="rain (mm)",
-        time_unit="day",
-        rain_type="rate"
-)
+        time_col='day',
+        rain_col='rain (mm)',
+        time_unit="days",
+        rain_type="rate",
+        zones=rain_zones
+    )
 
     # ==========================================
     # 3. CREATE MESH WITH MATERIALS
@@ -102,7 +103,7 @@ def main():
     )
 
     # Save probe data to CSV
-    probe_manager.save_to_csv("water_table_data.csv", reference_elevation=5.0, sep=";")
+    probe_manager.save_to_csv("water_table_data_120cm.csv", reference_elevation=5.0)
 
 if __name__ == "__main__":
     main()

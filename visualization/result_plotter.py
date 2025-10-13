@@ -104,7 +104,7 @@ class ResultsPlotter:
         # Set limits
         if len(times_hours) > 0:
             ax.set_xlim([0, times_hours[-1]])
-        ax.set_ylim([0, self.config.Ly])
+        ax.set_ylim([1,2])
     
     def _plot_snapshots(self, fig, gs, snapshots):
         """Plot spatial snapshots in middle and bottom rows"""

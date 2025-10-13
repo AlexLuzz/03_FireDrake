@@ -102,7 +102,8 @@ class RainScenario:
                  rain_col: str = "intensity_mm_hr",
                  time_unit: str = "hours",
                  rain_type: str = "rate",
-                 zones: List[RainZone] = None):
+                 zones: List[RainZone] = None,
+                 delimiter: str = None):
         """
         Load rain events from CSV file with flexible column names and units
         
@@ -121,6 +122,7 @@ class RainScenario:
             time_unit: Unit of time column - "hours" or "days"
             rain_type: Type of rain data - "rate" (mm/hour) or "depth" (cumulative mm)
             zones: Optional spatial zones (default: entire domain)
+            delimiter: CSV delimiter (default: auto-detect from first line)
         
         Returns:
             RainScenario object
@@ -147,14 +149,47 @@ class RainScenario:
                 rain_type="depth"
             )
         """
-        # Read CSV using standard library
-        with open(csv_path, 'r') as f:
-            reader = csv.DictReader(f)
+        # Auto-detect delimiter if not specified
+        if delimiter is None:
+            with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                first_line = f.readline()
+                if ';' in first_line:
+                    delimiter = ';'
+                elif ',' in first_line:
+                    delimiter = ','
+                elif '\t' in first_line:
+                    delimiter = '\t'
+                else:
+                    delimiter = ','  # default
+        
+        # Read CSV using standard library with UTF-8 BOM handling
+        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f, delimiter=delimiter)
             rows = list(reader)
         
-        # Extract raw data
-        times_raw = np.array([float(row[time_col]) for row in rows])
-        rain_raw = np.array([float(row[rain_col]) for row in rows])
+        # Strip whitespace from column names (common issue)
+        if rows:
+            rows = [{k.strip(): v for k, v in row.items()} for row in rows]
+        
+        # Helper function to parse floats with comma or dot as decimal separator
+        def parse_float(value_str):
+            """Parse float that might use comma as decimal separator"""
+            return float(value_str.strip().replace(',', '.'))
+        
+        # Extract raw data with better error messages
+        try:
+            times_raw = np.array([parse_float(row[time_col]) for row in rows])
+        except KeyError:
+            available_cols = list(rows[0].keys()) if rows else []
+            raise KeyError(f"Column '{time_col}' not found in CSV. "
+                         f"Available columns: {available_cols}")
+        
+        try:
+            rain_raw = np.array([parse_float(row[rain_col]) for row in rows])
+        except KeyError:
+            available_cols = list(rows[0].keys()) if rows else []
+            raise KeyError(f"Column '{rain_col}' not found in CSV. "
+                         f"Available columns: {available_cols}")
         
         # Convert time to hours
         if time_unit.lower() in ["hours", "hour", "h"]:
