@@ -1,6 +1,6 @@
 """
 Coupled Richards Equation and Chloride Transport
-Iterative or sequential coupling approach
+Sequential coupling approach for your Richards solver
 """
 
 from firedrake import *
@@ -16,129 +16,160 @@ class CoupledFlowTransport:
     3. Solve transport equation with updated velocity and saturation
     """
     
-    def __init__(self, mesh, richards_solver, transport_solver):
+    def __init__(self, richards_solver, transport_solver):
         """
+        Initialize coupled solver
+        
         Parameters:
         -----------
-        mesh : firedrake.Mesh
-            Computational mesh
-        richards_solver : object
-            Your existing Richards equation solver
-            Must have: pressure field, saturation field, hydraulic conductivity
+        richards_solver : RichardsSolver
+            Your Richards equation solver instance
         transport_solver : ChlorideTransport
             Chloride transport solver instance
         """
-        self.mesh = mesh
         self.richards = richards_solver
         self.transport = transport_solver
+        self.mesh = richards_solver.mesh
+        self.V = richards_solver.V
         
-        # Function spaces
-        self.V_vec = VectorFunctionSpace(mesh, "CG", 1)
-        self.V = FunctionSpace(mesh, "CG", 1)
+        # Function space for velocity
+        self.V_vec = VectorFunctionSpace(self.mesh, "CG", 1)
         
-    def compute_darcy_velocity(self, pressure_head, K_field):
+        # Storage for velocity field
+        self.velocity = Function(self.V_vec, name="Darcy_Velocity")
+        
+    def compute_darcy_velocity(self):
         """
-        Compute Darcy velocity from pressure head
-        v = -K * grad(h)
+        Compute Darcy velocity from Richards solver state
+        v = -K * grad(h) = -K * (grad(p) + grad(z))
         where h = pressure_head + z (total hydraulic head)
-        
-        Parameters:
-        -----------
-        pressure_head : Function
-            Pressure head (m) from Richards equation
-        K_field : Function
-            Hydraulic conductivity (m/s)
         
         Returns:
         --------
         velocity : Function
             Darcy velocity (m/s)
         """
-        # Total hydraulic head
-        x = SpatialCoordinate(self.mesh)
+        # Get pressure head from Richards solver
+        p = self.richards.p_new
+        
+        # Get hydraulic conductivity field (K = kr * Ks)
+        kr = self.richards.kr_n
+        Ks = self.richards.Ks_field
+        K = kr * Ks
+        
+        # Elevation (z coordinate)
+        coords = SpatialCoordinate(self.mesh)
         if self.mesh.geometric_dimension() == 2:
-            z = x[1]  # Assuming vertical is second coordinate
+            z = coords[1]  # y is vertical
         elif self.mesh.geometric_dimension() == 3:
-            z = x[2]  # Assuming vertical is third coordinate
+            z = coords[2]  # z is vertical
         else:  # 1D
-            z = x[0]
-            
-        total_head = pressure_head + z
+            z = coords[0]
+        
+        # Total hydraulic head: h = p + z
+        total_head = p + z
         
         # Darcy velocity: v = -K * grad(h)
-        velocity = Function(self.V_vec, name="Darcy_Velocity")
-        
-        # Project velocity
+        # Use projection to compute velocity
         v = TrialFunction(self.V_vec)
         w = TestFunction(self.V_vec)
         
         a = inner(v, w) * dx
-        L = inner(-K_field * grad(total_head), w) * dx
+        L = inner(-K * grad(total_head), w) * dx
         
-        solve(a == L, velocity)
+        solve(a == L, self.velocity)
         
-        return velocity
+        return self.velocity
     
-    def couple_sequential(self, t_end, dt_richards, dt_transport, 
-                         richards_bc, transport_bc,
-                         output_interval=None):
+    def run(self, t_end, dt_richards, dt_transport=None,
+            transport_bc=None, dirichlet_bcs=None,
+            output_interval=None, probe_manager=None,
+            snapshot_manager=None, print_diagnostics=False):
         """
-        Sequential coupling: solve Richards then Transport
+        Run coupled simulation
         
         Parameters:
         -----------
         t_end : float
             End time (seconds)
         dt_richards : float
-            Time step for Richards equation
+            Time step for Richards equation (seconds)
         dt_transport : float
-            Time step for transport (can be subdivisions of dt_richards)
-        richards_bc : dict
-            Boundary conditions for Richards equation
+            Time step for transport (seconds). If None, uses dt_richards
         transport_bc : dict
-            Boundary conditions for transport
+            Boundary conditions for transport {boundary_id: value}
+        dirichlet_bcs : list
+            Dirichlet BCs for Richards equation
         output_interval : float
-            Output every N seconds (None = every Richards step)
+            Output interval (seconds). If None, outputs every Richards step
+        probe_manager : ProbeManager
+            Optional probe manager for monitoring
+        snapshot_manager : SnapshotManager
+            Optional snapshot manager for spatial output
+        print_diagnostics : bool
+            Print detailed diagnostics
         """
+        if dt_transport is None:
+            dt_transport = dt_richards
+        
+        # Initialize counters
         t = 0.0
+        step = 0
         output_count = 0
         
-        # Output files
-        pressure_file = File("results/pressure_head.pvd")
-        saturation_file = File("results/saturation.pvd")
-        velocity_file = File("results/velocity.pvd")
-        concentration_file = File("results/chloride_concentration.pvd")
+        # Output files for transport
+        if snapshot_manager is not None:
+            concentration_file = File("results/chloride_concentration.pvd")
+            velocity_file = File("results/darcy_velocity.pvd")
         
-        print(f"Starting coupled simulation")
-        print(f"Richards dt: {dt_richards}s, Transport dt: {dt_transport}s")
+        print("=" * 70)
+        print("COUPLED FLOW-TRANSPORT SIMULATION")
+        print("=" * 70)
+        print(f"Total duration: {t_end/3600:.1f} hours")
+        print(f"Richards dt: {dt_richards:.1f} s")
+        print(f"Transport dt: {dt_transport:.1f} s")
+        print(f"Substeps per Richards step: {int(dt_richards/dt_transport)}")
+        print()
+        
+        # Print Richards solver info
+        print("Richards Equation:")
+        self.richards.domain.print_summary()
+        print()
+        
+        # Print transport info
+        print("Chloride Transport:")
+        print(f"  Molecular diffusion: {self.transport.D_molecular:.2e} m²/s")
+        print(f"  Longitudinal dispersivity: {self.transport.alpha_L:.3f} m")
+        print(f"  Transverse dispersivity: {self.transport.alpha_T:.4f} m")
+        print(f"  Tortuosity model: {self.transport.tortuosity_model}")
+        if self.transport.include_adsorption:
+            print(f"  Adsorption: Kd = {self.transport.K_d:.2e} m³/kg")
+        print()
+        
+        print("Starting time integration...")
+        print("-" * 70)
         
         while t < t_end:
-            print(f"\n=== Time: {t/86400:.3f} days ({t:.1f}s) ===")
+            # =======================================
+            # STEP 1: Solve Richards Equation
+            # =======================================
+            self.richards.solve_timestep(t + dt_richards, bcs=dirichlet_bcs)
             
-            # Step 1: Solve Richards equation
-            print("Solving Richards equation...")
-            # Assuming your Richards solver has a method like:
-            # self.richards.solve_timestep(dt_richards, bc_dict=richards_bc)
-            pressure = self.richards.solve_timestep(dt_richards, richards_bc)
-            
-            # Get saturation from Richards solver
-            # Assuming: saturation = self.richards.compute_saturation()
-            saturation = self.richards.get_saturation()
-            
-            # Get hydraulic conductivity
-            # Assuming: K = self.richards.get_hydraulic_conductivity()
-            K = self.richards.get_hydraulic_conductivity()
-            
-            # Step 2: Compute Darcy velocity
-            print("Computing Darcy velocity...")
-            velocity = self.compute_darcy_velocity(pressure, K)
-            
-            # Step 3: Update transport solver with new flow field
+            # =======================================
+            # STEP 2: Compute Darcy Velocity
+            # =======================================
+            velocity = self.compute_darcy_velocity()
             self.transport.set_velocity(velocity)
+            
+            # =======================================
+            # STEP 3: Update Saturation
+            # =======================================
+            saturation = self.richards.domain.compute_saturation_field(self.richards.p_new)
             self.transport.set_saturation(saturation)
             
-            # Step 4: Solve transport (possibly with sub-stepping)
-            print("Solving chloride transport...")
+            # =======================================
+            # STEP 4: Solve Transport (with sub-stepping)
+            # =======================================
             n_substeps = int(dt_richards / dt_transport)
             
             for substep in range(n_substeps):
@@ -147,182 +178,59 @@ class CoupledFlowTransport:
                     use_stabilization=True,
                     bc_dict=transport_bc
                 )
-                
-                if substep < n_substeps - 1:
-                    print(f"  Substep {substep+1}/{n_substeps}")
             
+            # Update time
             t += dt_richards
+            step += 1
             
-            # Output
-            if output_interval is None or (t % output_interval < dt_richards):
-                print(f"Writing output {output_count}")
-                pressure_file.write(pressure)
-                saturation_file.write(saturation)
-                velocity_file.write(velocity)
-                concentration_file.write(self.transport.c)
-                output_count += 1
+            # =======================================
+            # MONITORING AND OUTPUT
+            # =======================================
+            
+            # Record probes
+            if probe_manager is not None:
+                probe_manager.record(t, self.richards.p_new)
+            
+            # Snapshots
+            if snapshot_manager is not None:
+                if output_interval is None or (t % output_interval < dt_richards):
+                    snapshot_manager.record(t, self.richards.p_new)
+                    concentration_file.write(self.transport.c, time=t)
+                    velocity_file.write(self.velocity, time=t)
+                    output_count += 1
+            
+            # Progress reporting
+            if step % max(1, int(3600 / dt_richards)) == 0:
+                print(f"Time: {t/3600:.2f}h / {t_end/3600:.1f}h", end="")
                 
-                # Print diagnostics
-                c_max = self.transport.c.dat.data.max()
-                c_min = self.transport.c.dat.data.min()
-                print(f"  Concentration range: [{c_min:.2e}, {c_max:.2e}] mol/m³")
-                
-        print(f"\nSimulation complete! Total time: {t/86400:.3f} days")
-
-
-class SimpleRichardsAdapter:
-    """
-    Adapter to make your Richards solver compatible with coupling
-    Modify this to match your actual Richards implementation
-    """
-    
-    def __init__(self, mesh):
-        self.mesh = mesh
-        self.V = FunctionSpace(mesh, "CG", 1)
+                if print_diagnostics:
+                    # Pressure diagnostics
+                    p_vals = self.richards.p_new.dat.data[:]
+                    p_min, p_max, p_mean = p_vals.min(), p_vals.max(), p_vals.mean()
+                    
+                    # Concentration diagnostics
+                    c_vals = self.transport.c.dat.data[:]
+                    c_min, c_max, c_mean = c_vals.min(), c_vals.max(), c_vals.mean()
+                    
+                    # Velocity diagnostics
+                    v_vals = self.velocity.dat.data[:]
+                    v_mag = np.sqrt(np.sum(v_vals**2, axis=1))
+                    v_max = v_mag.max()
+                    
+                    print()
+                    print(f"  Pressure: [{p_min:.3f}, {p_max:.3f}] m (mean: {p_mean:.3f})")
+                    print(f"  Chloride: [{c_min:.2e}, {c_max:.2e}] mol/m³ (mean: {c_mean:.2e})")
+                    print(f"  Velocity: max |v| = {v_max:.2e} m/s")
+                else:
+                    print()
         
-        # State variables
-        self.pressure_head = Function(self.V, name="Pressure_Head")
-        self.saturation = Function(self.V, name="Saturation")
-        self.hydraulic_conductivity = Function(self.V, name="Hydraulic_Conductivity")
+        print("-" * 70)
+        print(f"Simulation complete! ({output_count} outputs saved)")
+        print("=" * 70)
         
-        # Soil parameters (example: van Genuchten)
-        self.theta_s = 0.45  # Saturated water content
-        self.theta_r = 0.067  # Residual water content
-        self.alpha = 0.0028  # van Genuchten parameter (1/cm)
-        self.n = 1.41  # van Genuchten parameter
-        self.K_sat = 1.19e-5  # Saturated hydraulic conductivity (m/s)
-        
-    def solve_timestep(self, dt, bc_dict):
-        """
-        Your actual Richards solver would go here
-        This is just a placeholder showing the interface needed
-        """
-        # Your Richards equation solve
-        # ...
-        # Return pressure head
-        return self.pressure_head
-    
-    def get_saturation(self):
-        """
-        Compute saturation from pressure head (van Genuchten)
-        """
-        h = self.pressure_head
-        
-        # van Genuchten equation
-        alpha = self.alpha
-        n = self.n
-        m = 1 - 1/n
-        
-        # Effective saturation
-        Se = conditional(
-            h < 0,
-            1.0 / (1.0 + abs(alpha * h)**n)**m,
-            1.0
-        )
-        
-        # Actual saturation
-        self.saturation.interpolate(
-            self.theta_r + (self.theta_s - self.theta_r) * Se
-        )
-        
-        return self.saturation
-    
-    def get_hydraulic_conductivity(self):
-        """
-        Compute hydraulic conductivity from saturation
-        """
-        h = self.pressure_head
-        
-        # van Genuchten relative permeability
-        alpha = self.alpha
-        n = self.n
-        m = 1 - 1/n
-        
-        Se = conditional(
-            h < 0,
-            1.0 / (1.0 + abs(alpha * h)**n)**m,
-            1.0
-        )
-        
-        K_rel = sqrt(Se) * (1 - (1 - Se**(1/m))**m)**2
-        
-        self.hydraulic_conductivity.interpolate(
-            self.K_sat * K_rel
-        )
-        
-        return self.hydraulic_conductivity
-
-
-# Complete example with coupling
-def run_coupled_simulation():
-    """
-    Complete example: coupled flow and chloride transport
-    """
-    from chloride_transport import ChlorideTransport
-    
-    # Create mesh (2D vertical cross-section)
-    nx, ny = 50, 100
-    Lx, Ly = 1.0, 2.0  # 1m wide, 2m deep
-    mesh = RectangleMesh(nx, ny, Lx, Ly)
-    
-    # ===== Setup Richards Equation =====
-    print("Setting up Richards equation solver...")
-    richards = SimpleRichardsAdapter(mesh)
-    # Initialize with hydrostatic conditions
-    x = SpatialCoordinate(mesh)
-    richards.pressure_head.interpolate(-x[1])  # Negative depth
-    
-    # ===== Setup Transport =====
-    print("Setting up chloride transport solver...")
-    porous_props = {
-        'porosity': 0.35,
-        'initial_saturation': 0.8
-    }
-    
-    transport_props = {
-        'molecular_diffusion': 2.03e-9,  # m²/s
-        'longitudinal_dispersivity': 0.05,  # 5 cm
-        'transverse_dispersivity': 0.005,  # 5 mm
-        'tortuosity': 'millington_quirk'
-    }
-    
-    transport = ChlorideTransport(mesh, porous_props, transport_props)
-    transport.set_initial_condition(0.0)  # Initially clean
-    
-    # ===== Create Coupled Solver =====
-    print("Creating coupled solver...")
-    coupled = CoupledFlowTransport(mesh, richards, transport)
-    
-    # ===== Boundary Conditions =====
-    # Richards BC (example)
-    richards_bc = {
-        1: 0.0,  # Top: ponding (h=0)
-        # Bottom: free drainage (no BC needed)
-    }
-    
-    # Transport BC
-    transport_bc = {
-        1: Constant(50.0),  # Top: 50 mol/m³ chloride influx
-        # Bottom: outflow (no BC)
-    }
-    
-    # ===== Run Simulation =====
-    print("Running coupled simulation...")
-    t_end = 7 * 86400  # 7 days
-    dt_richards = 3600.0  # 1 hour for Richards
-    dt_transport = 900.0  # 15 minutes for transport
-    
-    coupled.couple_sequential(
-        t_end=t_end,
-        dt_richards=dt_richards,
-        dt_transport=dt_transport,
-        richards_bc=richards_bc,
-        transport_bc=transport_bc,
-        output_interval=3600.0  # Output every hour
-    )
-    
-    print("Done!")
-
-
-if __name__ == "__main__":
-    run_coupled_simulation()
+        return {
+            'pressure': self.richards.p_new,
+            'saturation': saturation,
+            'concentration': self.transport.c,
+            'velocity': self.velocity
+        }

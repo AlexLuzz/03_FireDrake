@@ -155,6 +155,9 @@ class RichardsSolver:
         print(f"Mesh: {self.config.nx} x {self.config.ny} elements")
         print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
         
+        probe_manager.record_initial(self.p_n)
+        snapshot_manager.record_initial(self.p_n)
+
         t = 0.0
         for step in range(self.config.num_steps):
             t += self.config.dt
@@ -163,13 +166,11 @@ class RichardsSolver:
             self.solve_timestep(t)
             
             # Record at monitoring points
-            if probe_manager is not None:
-                probe_manager.record(t, self.p_new)
+            probe_manager.record(t, self.p_new)
             
             # Save snapshots
-            if snapshot_manager is not None:
-                if snapshot_manager.should_record(t, self.config.dt):
-                    snapshot_manager.record(t, self.p_new)
+            if snapshot_manager.should_record(t, self.config.dt):
+                snapshot_manager.record(t, self.p_new)
             
             # Print progress every hour
             if step % int(3600/self.config.dt) == 0:

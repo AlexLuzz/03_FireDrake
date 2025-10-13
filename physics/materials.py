@@ -28,7 +28,7 @@ class SoilCurveData:
             pressure_heads=pressure_m,
             theta_values=[0.011, 0.014, 0.019, 0.023, 0.027, 0.034, 0.039, 0.045, 0.059, 0.083, 0.140],
             kr_values=[0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.010, 0.010, 0.070, 1.000],
-            Ks=1e-7
+            Ks=9e-6
         )
     
     @classmethod
@@ -43,7 +43,7 @@ class SoilCurveData:
             pressure_heads=pressure_m,
             theta_values=[0.017, 0.021, 0.028, 0.035, 0.042, 0.052, 0.061, 0.076, 0.138, 0.283, 0.430],
             kr_values=[0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.010, 0.100, 1.000],
-            Ks=5e-6
+            Ks=4e-5
         )
 
 @dataclass

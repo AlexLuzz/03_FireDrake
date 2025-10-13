@@ -22,13 +22,14 @@ class ResultsPlotter:
         self.mesh = mesh
         self.coords = mesh.coordinates.dat.data
     
-    def plot_complete_results(self, probe_data, snapshots, filename=None):
+    def plot_complete_results(self, probe_data, snapshots, rain_scenario=None, filename=None):
         """
         Create complete results figure with time series and snapshots
         
         Args:
             probe_data: Dictionary from ProbeManager.get_data()
             snapshots: Dictionary from SnapshotManager.snapshots
+            rain_scenario: Optional RainScenario for plotting rain events
             filename: Output filename (optional)
         """
         # Create figure with 3x3 grid
@@ -36,7 +37,7 @@ class ResultsPlotter:
         gs = GridSpec(3, 3, figure=fig, hspace=0.35, wspace=0.35)
         
         # Top row: Time series (spanning all columns)
-        self._plot_time_series(fig, gs, probe_data)
+        self._plot_time_series(fig, gs, probe_data, rain_scenario)
         
         # Middle and bottom rows: Spatial snapshots (6 plots)
         self._plot_snapshots(fig, gs, snapshots)
@@ -55,7 +56,7 @@ class ResultsPlotter:
         print(f"\nPlot saved as '{filename}'")
         plt.close()
     
-    def _plot_time_series(self, fig, gs, probe_data):
+    def _plot_time_series(self, fig, gs, probe_data, rain_scenario=None):
         """Plot time series in top row"""
         ax = fig.add_subplot(gs[0, :])
         
@@ -66,49 +67,53 @@ class ResultsPlotter:
         
         # Plot each probe
         for idx, (name, data) in enumerate(time_series.items()):
+            # Convert data to numpy array
+            data_array = np.array(data)
+            
+            # Plot with markers at reasonable intervals
             marker_every = max(1, int(len(times_hours) / 50))
-            ax.plot(times_hours, data, color=colors[idx], 
+            ax.plot(times_hours, data_array, color=colors[idx % len(colors)], 
                    linewidth=2.5, label=name, marker='o', markersize=2,
                    markevery=marker_every)
         
-        # Rain event shading
-        rain_start_hr = self.config.rain_start / 3600.0
-        rain_end_hr = self.config.rain_end / 3600.0
-        ax.axvspan(rain_start_hr, rain_end_hr, alpha=0.2, 
-                  color='skyblue', label='Rain event', zorder=0)
+        # Rain event shading if scenario provided
+        if rain_scenario is not None:
+            for event in rain_scenario.events:
+                ax.axvspan(event.start_time, event.end_time, 
+                          alpha=0.15, color='lightblue', label='Rain event')
         
         # Water table reference
-        ax.axhline(y=2.0, color='cyan', linestyle='--', linewidth=2, 
-                  label='Initial water table', alpha=0.7)
+        ax.axhline(y=self.config.initial_water_table, color='cyan', 
+                  linestyle='--', linewidth=2, 
+                  label=f'Water table (p=0)', alpha=0.7)
         
         # Formatting
-        ax.set_ylabel('Water table elevation (m)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Water Table Elevation (m)', fontsize=12, fontweight='bold')
         ax.set_xlabel('Time (hours)', fontsize=12, fontweight='bold')
-        ax.set_title('Water Level Sensor Readings (Water Table Elevation)', 
+        ax.set_title('Water Level Sensor Readings (Depth to Water Table)', 
                     fontsize=14, fontweight='bold', pad=15)
-        ax.legend(loc='upper right', fontsize=10, framealpha=0.9)
+        
+        # Handle legend - remove duplicates
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys(), 
+                 loc='upper right', fontsize=10, framealpha=0.9)
+        
         ax.grid(True, alpha=0.3)
-        ax.set_ylim([0, 5])  # Show full domain height
         
-        # Statistics box
-        stats_lines = []
-        for idx, (name, data) in enumerate(time_series.items()):
-            peak = max(data)
-            initial = data[0]
-            stats_lines.append(f'{name.split("(")[0].strip()}: Δp = {peak-initial:.3f}m')
-        
-        stats_text = '\n'.join(stats_lines)
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=9,
-               verticalalignment='top',
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7,
-                        edgecolor='black', linewidth=1.5))
+        # Set limits
+        if len(times_hours) > 0:
+            ax.set_xlim([0, times_hours[-1]])
+        ax.set_ylim([0, self.config.Ly])
     
     def _plot_snapshots(self, fig, gs, snapshots):
         """Plot spatial snapshots in middle and bottom rows"""
         sorted_times = sorted(snapshots.keys())
+        
+        # Take exactly what we have, up to 6 unique times
         selected_times = sorted_times[:6] if len(sorted_times) >= 6 else sorted_times
         
-        # Pad if needed
+        # Pad with last snapshot if we have fewer than 6
         while len(selected_times) < 6:
             selected_times.append(selected_times[-1])
         
@@ -116,6 +121,9 @@ class ResultsPlotter:
         y_coords = self.coords[:, 1]
         
         colors = ['#1f77b4', '#2ca02c', '#d62728']
+        
+        # Track which times we've plotted to avoid showing duplicate labels
+        plotted_times = set()
         
         for idx, snap_time in enumerate(selected_times):
             row = 1 + idx // 3
@@ -155,18 +163,29 @@ class ResultsPlotter:
             ax.axhline(y=self.config.initial_water_table, color='cyan',
                       linestyle='--', linewidth=2, label='Initial water table', alpha=0.7)
             
-            # Monitoring points
-            for pt_idx, (x, y, name) in enumerate(self.config.monitor_points):
-                ax.plot(x, y, '*', color=colors[pt_idx], markersize=15,
-                       markeredgecolor='black', markeredgewidth=1.0, zorder=10)
+            # Monitoring points (if available in config)
+            if hasattr(self.config, 'monitor_x_positions'):
+                for pt_idx, x in enumerate(self.config.monitor_x_positions):
+                    y_pos = self.config.initial_water_table
+                    ax.plot(x, y_pos, '*', color=colors[pt_idx % len(colors)], 
+                           markersize=15, markeredgecolor='black', 
+                           markeredgewidth=1.0, zorder=10)
             
             # Formatting
             ax.set_xlabel('x (m)', fontsize=10, fontweight='bold')
             ax.set_ylabel('y (m)', fontsize=10, fontweight='bold')
             
-            time_label = f't = {snap_time/3600:.1f}h'
-            if self.config.rain_start <= snap_time <= self.config.rain_end:
-                time_label += ' (RAIN)'
+            # Time label - mark duplicates and distinguish t=0
+            time_hours = snap_time / 3600
+            if snap_time == 0:
+                time_label = 't = 0.0h (INITIAL)'
+            elif snap_time in plotted_times:
+                time_label = f't = {time_hours:.1f}h (FINAL)'
+            else:
+                time_label = f't = {time_hours:.1f}h'
+            
+            plotted_times.add(snap_time)
+            
             ax.set_title(time_label, fontsize=11, fontweight='bold')
             
             ax.set_aspect('equal')
@@ -182,4 +201,3 @@ class ResultsPlotter:
         cbar.set_label('Saturation', fontsize=12, fontweight='bold')
         cbar.set_ticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
         cbar.set_ticklabels(['0%\n(dry)', '20%', '40%', '60%', '80%', '100%\n(saturated)'])
-        cbar.ax.invert_yaxis()

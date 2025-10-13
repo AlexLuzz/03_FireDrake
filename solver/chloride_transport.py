@@ -1,7 +1,6 @@
 """
-Chloride Transport in Porous Media using FireDrake
+Chloride Transport in Porous Media using Firedrake
 Coupled with Richards Equation for unsaturated/saturated flow
-Based on COMSOL Transport of Diluted Species interface
 """
 
 from firedrake import *
@@ -28,9 +27,16 @@ class ChlorideTransport:
         mesh : firedrake.Mesh
             Computational mesh
         porous_properties : dict
-            Porosity, saturation, etc.
+            'porosity': float or Function - porosity field
+            'initial_saturation': float - initial saturation (0-1)
         transport_properties : dict
-            Diffusion coefficient, dispersivity, etc.
+            'molecular_diffusion': float - D_m for Cl- (m²/s), default 2.03e-9
+            'longitudinal_dispersivity': float - alpha_L (m), default 0.01
+            'transverse_dispersivity': float - alpha_T (m), default 0.001
+            'tortuosity': str - 'millington_quirk', 'bruggeman', or 'simple'
+            'include_adsorption': bool - include adsorption, default False
+            'bulk_density': float - rho_b (kg/m³), default 1500
+            'distribution_coefficient': float - K_d (m³/kg), default 0.0
         """
         self.mesh = mesh
         self.porous_props = porous_properties
@@ -48,7 +54,12 @@ class ChlorideTransport:
         self.velocity = Function(self.V_vec, name="Darcy_Velocity")
         
         # Porous media properties
-        self.porosity = self.porous_props.get('porosity', 0.4)
+        porosity_input = self.porous_props.get('porosity', 0.4)
+        if isinstance(porosity_input, (int, float)):
+            self.porosity = Constant(porosity_input)
+        else:
+            self.porosity = porosity_input
+        
         self.saturation = Function(self.V, name="Saturation")
         self.saturation.assign(self.porous_props.get('initial_saturation', 1.0))
         
@@ -141,7 +152,7 @@ class ChlorideTransport:
         R = 1 + (rho_b * K_d) / theta
         """
         if not self.include_adsorption:
-            return 1.0
+            return Constant(1.0)
         
         theta = self.porosity * self.saturation
         R = 1.0 + (self.rho_b * self.K_d) / theta
@@ -177,8 +188,7 @@ class ChlorideTransport:
         # Diffusion/dispersion term (integrated by parts)
         diffusion_term = inner(D * grad(c), grad(w)) * dx
         
-        # Convection term (SUPG stabilization recommended)
-        # Using conservative form: div(v*c)
+        # Convection term (conservative form)
         convection_term = -c * div(v * w) * dx
         
         # Source/sink term
@@ -195,7 +205,7 @@ class ChlorideTransport:
     
     def build_stabilized_form(self, source_term=None, stabilization='supg'):
         """
-        Build stabilized variational form (SUPG or GLS)
+        Build stabilized variational form (SUPG)
         Important for convection-dominated problems
         """
         c = self.c
@@ -215,10 +225,10 @@ class ChlorideTransport:
             D_eff = self.effective_diffusivity()
             
             # Peclet number
-            Pe = v_mag * h / (2.0 * D_eff)
+            Pe = v_mag * h / (2.0 * D_eff + 1e-12)
             
             # SUPG parameter
-            tau_supg = h / (2.0 * v_mag) * (1.0 / tanh(Pe) - 1.0 / Pe)
+            tau_supg = h / (2.0 * v_mag + 1e-12) * (1.0 / (tanh(Pe) + 1e-12) - 1.0 / (Pe + 1e-12))
             
             # Residual
             theta = self.porosity * self.saturation
@@ -234,7 +244,8 @@ class ChlorideTransport:
             
         return F
     
-    def solve_timestep(self, dt=None, use_stabilization=True, bc_dict=None):
+    def solve_timestep(self, dt=None, use_stabilization=True, bc_dict=None, 
+                      solver_parameters=None):
         """
         Solve transport equation for one time step
         
@@ -246,6 +257,8 @@ class ChlorideTransport:
             Use SUPG stabilization for convection
         bc_dict : dict
             Boundary conditions {boundary_id: value or 'no_flux'}
+        solver_parameters : dict
+            Solver parameters (optional)
         """
         if dt is not None:
             self.dt.assign(dt)
@@ -263,13 +276,16 @@ class ChlorideTransport:
                 if bc_value != 'no_flux':
                     bcs.append(DirichletBC(self.V, bc_value, bc_id))
         
+        # Default solver parameters
+        if solver_parameters is None:
+            solver_parameters = {
+                'ksp_type': 'gmres',
+                'pc_type': 'ilu',
+                'ksp_rtol': 1e-8
+            }
+        
         # Solve
-        solve(F == 0, self.c, bcs=bcs,
-              solver_parameters={
-                  'ksp_type': 'gmres',
-                  'pc_type': 'ilu',
-                  'ksp_rtol': 1e-8
-              })
+        solve(F == 0, self.c, bcs=bcs, solver_parameters=solver_parameters)
         
         # Update previous time step
         self.c_n.assign(self.c)
@@ -277,79 +293,16 @@ class ChlorideTransport:
         return self.c
     
     def set_initial_condition(self, c_init):
-        """Set initial concentration"""
+        """
+        Set initial concentration
+        
+        Parameters:
+        -----------
+        c_init : float, Constant, or Function
+            Initial concentration (mol/m³)
+        """
         if isinstance(c_init, (int, float)):
             self.c.assign(Constant(c_init))
         else:
             self.c.assign(c_init)
         self.c_n.assign(self.c)
-
-
-# Example usage function
-def example_chloride_transport():
-    """
-    Example: Chloride transport in 1D column
-    """
-    # Create 1D mesh
-    nx = 100
-    length = 1.0  # 1 meter column
-    mesh = IntervalMesh(nx, length)
-    
-    # Porous media properties
-    porous_props = {
-        'porosity': 0.35,
-        'initial_saturation': 1.0  # Fully saturated
-    }
-    
-    # Transport properties for chloride
-    transport_props = {
-        'molecular_diffusion': 2.03e-9,  # m²/s at 25°C
-        'longitudinal_dispersivity': 0.01,  # m
-        'transverse_dispersivity': 0.001,  # m
-        'tortuosity': 'millington_quirk',
-        'include_adsorption': False
-    }
-    
-    # Create transport solver
-    transport = ChlorideTransport(mesh, porous_props, transport_props)
-    
-    # Initial condition: no chloride
-    transport.set_initial_condition(0.0)
-    
-    # Set constant velocity (example: 1e-6 m/s downward)
-    V_vec = VectorFunctionSpace(mesh, "CG", 1)
-    velocity = Function(V_vec)
-    velocity.interpolate(as_vector([1e-6]))
-    transport.set_velocity(velocity)
-    
-    # Boundary conditions
-    # Top: constant concentration (100 mol/m³)
-    # Bottom: outflow (no BC needed with convection form)
-    bc_dict = {1: Constant(100.0)}  # boundary_id: value
-    
-    # Time stepping
-    t_end = 86400.0  # 1 day
-    dt = 3600.0  # 1 hour
-    t = 0.0
-    
-    # Output file
-    outfile = File("chloride_concentration.pvd")
-    
-    while t < t_end:
-        print(f"Time: {t/3600:.2f} hours")
-        
-        # Solve transport
-        transport.solve_timestep(dt=dt, bc_dict=bc_dict)
-        
-        # Output
-        outfile.write(transport.c)
-        
-        t += dt
-    
-    return transport
-
-
-if __name__ == "__main__":
-    # Run example
-    transport_model = example_chloride_transport()
-    print("Simulation complete!")

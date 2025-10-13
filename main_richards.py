@@ -1,4 +1,3 @@
-
 from firedrake import RectangleMesh, FunctionSpace
 from config import SimulationConfig
 from physics import *
@@ -13,8 +12,9 @@ def main():
     # ==========================================
     config = SimulationConfig(
         # You can modify config parameters here if needed
-        dt=600,
-        t_end=24*3600,
+        dt=3600,
+        t_end=15*3600,
+        monitor_x_positions=[8.0, 10.0, 12.5],
     )
     # ==========================================
     # 2. DEFINE RAIN SCENARIO
@@ -58,16 +58,17 @@ def main():
     # ==========================================
     # 5. CREATE MONITORING
     # ==========================================
-    probe_manager = ProbeManager(config.monitor_points)
+    probe_names = [f"LTC {i+1} (x={x:.1f}m)" for i, x in enumerate(config.monitor_x_positions)]
+    probe_manager = ProbeManager(mesh, config.monitor_x_positions, probe_names)
     
     # Define 6 snapshot times (in seconds)
     snapshot_times = [
         0.0,
-        3*3600.0,   # Before rain
-        4*3600.0,   # During rain
         5*3600.0,   # End of rain
-        8*3600.0,   # After rain
-        24*3600.0   # End of simulation
+        config.t_end * 0.1,
+        config.t_end * 0.3,
+        config.t_end * 0.7,
+        config.t_end 
     ]
     snapshot_manager = SnapshotManager(snapshot_times, domain)
     
@@ -88,7 +89,8 @@ def main():
     plotter = ResultsPlotter(config, mesh)
     plotter.plot_complete_results(
         probe_data=probe_manager.get_data(),
-        snapshots=snapshot_manager.snapshots
+        snapshots=snapshot_manager.snapshots,
+        rain_scenario=rain_scenario
     )
 
 if __name__ == "__main__":

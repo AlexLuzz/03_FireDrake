@@ -2,8 +2,9 @@
 Configuration module for Richards equation simulation
 Contains all global simulation parameters
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import List, Optional
 
 @dataclass
 class SimulationConfig:
@@ -22,21 +23,19 @@ class SimulationConfig:
     # Time discretization
     dt: float = 300.0            # Time step (seconds)
     t_end: float = 168 * 3600    # End time (seconds)
+    num_steps: int = field(init=False)
     
     # Physical parameters (not soil-specific)
     g: float = 9.81             # Gravity (m/s^2)
     initial_water_table: float = 1.5  # Initial water table height (m)
     
     # Numerical parameters
-    epsilon: float = 0.01       # Smoothing parameter near water table (m)
-    kr_min: float = 0.01        # Minimum relative permeability
-    Ss: float = 1e-4            # Specific storage coefficient (1/m)
+    epsilon: float = 0.05     # Smoothing parameter near water table (m)
+    kr_min: float = 0.03      # Minimum relative permeability
+    Ss: float = 1e-2            # Specific storage coefficient (1/m)
     
     # Monitoring points
-    monitor_points: list = None  # Will be set in __post_init__
-    
-    # Snapshot times (in seconds)
-    snapshot_times: list = None  # Will be computed in __post_init__
+    monitor_x_positions: List[float] = field(default_factory=lambda: [8.0, 10.0, 12.5])
     
     # Output settings
     output_dir: Path = Path("./results")
@@ -45,26 +44,9 @@ class SimulationConfig:
     # Solver parameters
     solver_type: str = 'gmres'
     preconditioner: str = 'ilu'
-    rtol: float = 1e-8
-    atol: float = 1e-10
+    rtol: float = 1e-4
+    atol: float = 1e-6
     max_iter: int = 100
-    
-    def __post_init__(self):
-        """Compute derived quantities and set defaults"""
-        self.num_steps = int(self.t_end / self.dt)
-        self.dx = self.Lx / self.nx
-        self.dy = self.Ly / self.ny
-        
-        # Set default monitoring points if not provided
-        if self.monitor_points is None:
-            self.monitor_points = [
-                (8, 1.0, "LTC 1"),
-                (10, 1.0, "LTC 2"),
-                (12.5, 1.0, "LTC 3")
-            ]
-        
-        # Create output directory
-        self.output_dir.mkdir(exist_ok=True, parents=True)
     
     @property
     def solver_parameters(self):
@@ -76,3 +58,7 @@ class SimulationConfig:
             'ksp_atol': self.atol,
             'ksp_max_it': self.max_iter
         }
+    
+    def __post_init__(self):
+        self.num_steps = int(self.t_end / self.dt)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
