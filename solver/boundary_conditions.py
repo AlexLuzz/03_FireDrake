@@ -2,7 +2,7 @@
 Boundary condition management for Richards equation
 Matches COMSOL hydraulic head boundary condition: p = ρg(H₀ - D)
 """
-from firedrake import DirichletBC, Function, Constant, SpatialCoordinate, conditional, And
+from firedrake import DirichletBC, Function, Constant
 import numpy as np
 
 class BoundaryConditionManager:
@@ -58,13 +58,14 @@ class BoundaryConditionManager:
         
         # Left boundary: Hydraulic head
         bc_left = DirichletBC(self.V, self.hydrostatic_profile, 1)
-        #bcs.append(bc_left)
+        bcs.append(bc_left)
         
         # Right boundary: Hydraulic head
         bc_right = DirichletBC(self.V, self.hydrostatic_profile, 2)
-        #bcs.append(bc_right)
+        bcs.append(bc_right)
         
-        bc_bottom = DirichletBC(self.V, Constant(0), 3)
+        #bc_bottom = DirichletBC(self.V, Constant(0), 3)
         #bcs.append(bc_bottom)
+        # Be careful it drains the system if you set p=0 at bottom
 
         return bcs

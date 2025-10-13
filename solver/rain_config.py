@@ -97,12 +97,16 @@ class RainScenario:
         return cls([event])
     
     @classmethod
-    def from_csv(cls, csv_path: str, time_col: str = "time_hours", 
-                 intensity_col: str = "intensity_mm_hr", zones: List[RainZone] = None):
+    def from_csv(cls, csv_path: str, 
+                 time_col: str = "time_hours", 
+                 rain_col: str = "intensity_mm_hr",
+                 time_unit: str = "hours",
+                 rain_type: str = "rate",
+                 zones: List[RainZone] = None):
         """
-        Load rain events from CSV file
+        Load rain events from CSV file with flexible column names and units
         
-        CSV format:
+        CSV format example:
             time_hours, intensity_mm_hr
             0.0, 0.0
             3.0, 0.0
@@ -112,21 +116,72 @@ class RainScenario:
         
         Args:
             csv_path: Path to CSV file
-            time_col: Name of time column (hours)
-            intensity_col: Name of intensity column (mm/hour)
+            time_col: Name of time column in CSV
+            rain_col: Name of rain column in CSV (always in mm)
+            time_unit: Unit of time column - "hours" or "days"
+            rain_type: Type of rain data - "rate" (mm/hour) or "depth" (cumulative mm)
             zones: Optional spatial zones (default: entire domain)
         
         Returns:
             RainScenario object
+        
+        Examples:
+            # Default: time in hours, rain rate in mm/hr
+            scenario = RainScenario.from_csv("rain.csv")
+            
+            # Time in days, rain rate in mm/day
+            scenario = RainScenario.from_csv(
+                "rain.csv", 
+                time_col="Day", 
+                rain_col="Rainfall_mm_day",
+                time_unit="days",
+                rain_type="rate"
+            )
+            
+            # Time in hours, cumulative rain depth in mm
+            scenario = RainScenario.from_csv(
+                "rain.csv",
+                time_col="Time_h",
+                rain_col="Cumulative_mm",
+                time_unit="hours",
+                rain_type="depth"
+            )
         """
         # Read CSV using standard library
         with open(csv_path, 'r') as f:
             reader = csv.DictReader(f)
             rows = list(reader)
         
-        # Extract data
-        times = np.array([float(row[time_col]) for row in rows])
-        intensities = np.array([float(row[intensity_col]) for row in rows])
+        # Extract raw data
+        times_raw = np.array([float(row[time_col]) for row in rows])
+        rain_raw = np.array([float(row[rain_col]) for row in rows])
+        
+        # Convert time to hours
+        if time_unit.lower() in ["hours", "hour", "h"]:
+            times = times_raw
+        elif time_unit.lower() in ["days", "day", "d"]:
+            times = times_raw * 24.0
+        else:
+            raise ValueError(f"Unknown time unit '{time_unit}'. Supported: 'hours', 'days'")
+        
+        # Convert rain data to intensity (mm/hr)
+        if rain_type.lower() == "rate":
+            # Already a rate, just need to convert from mm/time_unit to mm/hr
+            if time_unit.lower() in ["hours", "hour", "h"]:
+                intensities = rain_raw  # Already mm/hr
+            elif time_unit.lower() in ["days", "day", "d"]:
+                intensities = rain_raw / 24.0  # mm/day to mm/hr
+        elif rain_type.lower() == "depth":
+            # Cumulative depth - calculate rate from differences
+            intensities = np.zeros_like(rain_raw)
+            for i in range(1, len(rain_raw)):
+                dt = times[i] - times[i-1]  # in hours
+                if dt > 0:
+                    depth_increment = rain_raw[i] - rain_raw[i-1]
+                    intensities[i] = depth_increment / dt  # mm/hr
+            intensities[0] = 0.0  # First point has no rate
+        else:
+            raise ValueError(f"Unknown rain_type '{rain_type}'. Supported: 'rate', 'depth'")
         
         # Find rain events (periods with non-zero intensity)
         events = []

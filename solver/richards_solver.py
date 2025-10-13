@@ -182,6 +182,24 @@ class RichardsSolver:
                     print()
         
         print("\nSimulation complete!")
+        
+        # Print probe data summary
+        probe_data = probe_manager.get_data()
+        print(f"  Total time steps recorded: {len(probe_data['times'])}")
+        print(f"  Time range: {probe_data['times'][0]/3600:.2f}h - {probe_data['times'][-1]/3600:.2f}h")
+        for name, data in probe_data['data'].items():
+            data_array = np.array(data)
+            valid_data = data_array[~np.isnan(data_array)]
+            if len(valid_data) > 0:
+                print(f"  {name}: {valid_data.min():.3f}m - {valid_data.max():.3f}m ({len(valid_data)}/{len(data_array)} valid)")
+            else:
+                print(f"  {name}: ALL NaN!")
+
+        # Print snapshot summary
+        print(f"  Total snapshots recorded: {len(snapshot_manager.snapshots)}")
+        for t in sorted(snapshot_manager.snapshots.keys()):
+            print(f"    t = {t/3600:.2f}h")
+
     
     def compute_total_water_content(self):
         """

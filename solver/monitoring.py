@@ -35,25 +35,50 @@ class ProbeManager:
         p_sorted = p_at_x[sort_idx]
         
         if np.all(p_sorted > 0):
-            return y_sorted[-1]
+            return float(y_sorted[-1])
         if np.all(p_sorted < 0):
-            return y_sorted[0]
+            return float(y_sorted[0])
         
+        # Find where pressure crosses zero (from either direction)
         for i in range(len(p_sorted) - 1):
-            if p_sorted[i] <= 0 and p_sorted[i+1] >= 0:
-                y1, y2 = y_sorted[i], y_sorted[i+1]
-                p1, p2 = p_sorted[i], p_sorted[i+1]
-                if p2 - p1 != 0:
-                    return y1 - p1 * (y2 - y1) / (p2 - p1)
-                return y1
-        return None
+            p1, p2 = p_sorted[i], p_sorted[i+1]
+            y1, y2 = y_sorted[i], y_sorted[i+1]
+            
+            # Check if zero is between p1 and p2 (crossing in either direction)
+            if (p1 <= 0 <= p2) or (p2 <= 0 <= p1):
+                # Linear interpolation to find y where p=0
+                if abs(p2 - p1) > 1e-14:
+                    # y_wt = y1 + (0 - p1) * (y2 - y1) / (p2 - p1)
+                    wt_y = y1 + (0.0 - p1) * (y2 - y1) / (p2 - p1)
+                    return float(wt_y)
+                else:
+                    # p1 ≈ p2 ≈ 0, water table is in this interval
+                    return float((y1 + y2) / 2.0)
+        
+        # If no crossing found but domain is partially saturated, 
+        # water table is likely at the boundary between saturated/unsaturated
+        # Find the transition point
+        saturated_mask = p_sorted >= 0
+        if np.any(saturated_mask) and np.any(~saturated_mask):
+            # Find the highest unsaturated point or lowest saturated point
+            transition_idx = np.where(np.diff(saturated_mask.astype(int)) != 0)[0]
+            if len(transition_idx) > 0:
+                return float(y_sorted[transition_idx[0]])
+        
+        # Fallback: shouldn't reach here normally
+        return float(y_sorted[len(y_sorted)//2])
     
     def record(self, t, pressure_field):
         """Record water table elevation at all probe locations"""
         self.times.append(t)
         for x_pos, name in zip(self.x_positions, self.names):
-            wt = self.find_water_table_at_x(pressure_field, x_pos)
-            self.data[name].append(wt if wt is not None else np.nan)
+            try:
+                wt = self.find_water_table_at_x(pressure_field, x_pos)
+                self.data[name].append(wt)
+            except Exception as e:
+                # Only print warning if it's a genuine error, not expected behavior
+                print(f"Warning: Could not find water table at x={x_pos:.2f}m at t={t/3600:.2f}h: {e}")
+                self.data[name].append(np.nan)
     
     def record_initial(self, pressure_field):
         """Record initial state at t=0 (call before time loop)"""
@@ -120,14 +145,19 @@ class SnapshotManager:
     """Manages spatial snapshots at specific times"""
     
     def __init__(self, snapshot_times, domain):
-        self.snapshot_times = snapshot_times
+        self.snapshot_times = list(snapshot_times)  # Make a copy
+        self.requested_times = list(snapshot_times)  # Track which haven't been recorded yet
         self.snapshots = {}
         self.domain = domain
         self.initial_recorded = False
     
     def should_record(self, t, dt):
-        """Check if current time is close to a snapshot time"""
-        return any(abs(t - st) < dt/2 for st in self.snapshot_times)
+        """Check if current time is close to a snapshot time (only record once per time)"""
+        for req_time in self.requested_times[:]:  # Iterate over copy
+            if abs(t - req_time) < dt * 0.6:  # Within 60% of timestep
+                self.requested_times.remove(req_time)  # Remove so we don't record again
+                return True
+        return False
     
     def record(self, t, pressure_field):
         """Record snapshot at current time"""

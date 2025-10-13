@@ -13,7 +13,7 @@ def main():
     config = SimulationConfig(
         # You can modify config parameters here if needed
         dt=3600,
-        t_end=15*3600,
+        t_end=30*24*3600,
         monitor_x_positions=[8.0, 10.0, 12.5],
     )
     # ==========================================
@@ -24,11 +24,19 @@ def main():
         RainZone(x_min=9.0, x_max=11.0, multiplier=6.0, name="green_infrastructure"),
     ]
     rain_scenario = RainScenario.single_event(
-        start_hours=3.0,
-        end_hours=5.0,
+        start_hours=5.0,
+        end_hours=10.0,
         intensity_mm_hr=20.0,
         zones=rain_zones
     )
+
+    rain_scenario_csv = RainScenario.from_csv(
+        "RAF_rain_short.csv",
+        time_col="day",
+        rain_col="rain (mm)",
+        time_unit="day",
+        rain_type="rate"
+)
 
     # ==========================================
     # 3. CREATE MESH WITH MATERIALS
@@ -75,7 +83,7 @@ def main():
     # ==========================================
     # 6. CREATE SOLVER
     # ==========================================
-    solver = RichardsSolver(mesh, V, domain, rain_scenario, bc_manager, config)
+    solver = RichardsSolver(mesh, V, domain, rain_scenario_csv, bc_manager, config)
         
     # ==========================================
     # 7. RUN SIMULATION
@@ -90,8 +98,11 @@ def main():
     plotter.plot_complete_results(
         probe_data=probe_manager.get_data(),
         snapshots=snapshot_manager.snapshots,
-        rain_scenario=rain_scenario
+        rain_scenario=rain_scenario_csv
     )
+
+    # Save probe data to CSV
+    probe_manager.save_to_csv("water_table_data.csv", reference_elevation=5.0, sep=";")
 
 if __name__ == "__main__":
     main()
