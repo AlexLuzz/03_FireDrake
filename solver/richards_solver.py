@@ -160,7 +160,9 @@ class RichardsSolver:
         print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
         
         probe_manager.record_initial(self.p_n)
-        snapshot_manager.record_initial(self.p_n)
+
+        if snapshot_manager is not None:
+            snapshot_manager.record_initial(self.p_n)
 
         t = 0.0
         for step in range(self.config.num_steps):
@@ -173,8 +175,9 @@ class RichardsSolver:
             probe_manager.record(t, self.p_new)
 
             # During simulation
-            if snapshot_manager.should_record(t, self.config.dt):
-                snapshot_manager.record(t, self.p_new)  # Main snapshots
+            if snapshot_manager is not None:
+                if snapshot_manager.should_record(t, self.config.dt):
+                    snapshot_manager.record(t, self.p_new)  # Main snapshots
 
             # Print progress every hour
             if step % int(3600/self.config.dt) == 0:
@@ -199,10 +202,10 @@ class RichardsSolver:
             else:
                 print(f"  {name}: ALL NaN!")
 
-        # Print snapshot summary
-        print(f"  Total snapshots recorded: {len(snapshot_manager.snapshots)}")
-        for t in sorted(snapshot_manager.snapshots.keys()):
-            print(f"    t = {t/3600:.2f}h")
+        if snapshot_manager is not None:
+            print(f"  Total snapshots recorded: {len(snapshot_manager.snapshots)}")
+            for t in sorted(snapshot_manager.snapshots.keys()):
+                print(f"    t = {t/3600:.2f}h")
 
     
     def compute_total_water_content(self):

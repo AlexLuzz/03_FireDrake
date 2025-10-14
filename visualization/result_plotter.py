@@ -4,7 +4,7 @@ Results visualization - combines time series and spatial plots
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import numpy as np
-from scipy.interpolate import LinearNDInterpolator
+from scipy.interpolate import LinearNDInterpolator, interp1d
 from datetime import datetime
 import csv
 
@@ -24,8 +24,8 @@ class ResultsPlotter:
         self.mesh = mesh
         self.coords = mesh.coordinates.dat.data
     
-    def plot_complete_results(self, probe_data, snapshots, rain_scenario=None, 
-                             filename=None, measured_data_csv=None):
+    def plot_complete_results(self, probe_data, snapshots=None, rain_scenario=None, 
+                             filename=None, measured_data_csv=None, plot_residuals=False):
         """
         Create complete results figure with time series and snapshots
         
@@ -35,16 +35,35 @@ class ResultsPlotter:
             rain_scenario: Optional RainScenario for plotting rain events
             filename: Output filename (optional)
             measured_data_csv: Optional path to CSV with measured data (e.g., 'RAF_PZ_CG.csv')
+            plot_residuals: Whether to plot residuals (requires measured_data_csv)
         """
-        # Create figure with 3x3 grid
-        fig = plt.figure(figsize=(20, 10))
-        gs = GridSpec(3, 3, figure=fig, hspace=0.35, wspace=0.35)
+        # Smart grid layout calculation
+        # Layout: Water level (1 row) + Residuals (1 row if requested) + Snapshots (2 rows if provided)
+        n_time_series_rows = 1  # Water level time series
+        n_residual_rows = 1 if plot_residuals and measured_data_csv else 0
+        n_snapshot_rows = 2 if snapshots is not None else 0
+        total_rows = n_time_series_rows + n_residual_rows + n_snapshot_rows
         
-        # Top row: Time series (spanning all columns)
-        self._plot_time_series(fig, gs, probe_data, rain_scenario, measured_data_csv)
+        # Adjust figure height based on number of rows
+        fig_height = 5 * total_rows if total_rows > 0 else 10
+        fig = plt.figure(figsize=(20, fig_height))
+        gs = GridSpec(total_rows, 3, figure=fig, hspace=0.35, wspace=0.35)
         
-        # Middle and bottom rows: Spatial snapshots (6 plots)
-        self._plot_snapshots(fig, gs, snapshots)
+        # Track which row we're on
+        current_row = 0
+        
+        # Row 0: Water level time series (spanning all columns)
+        self._plot_time_series(fig, gs, probe_data, rain_scenario, measured_data_csv, row=current_row)
+        current_row += 1
+
+        # Row 1 (optional): Residuals
+        if plot_residuals and measured_data_csv:
+            self._plot_residuals(fig, gs, probe_data, measured_data_csv, row=current_row)
+            current_row += 1
+
+        # Rows 2-3 (optional): Spatial snapshots (6 plots in 2 rows)
+        if snapshots is not None:
+            self._plot_snapshots(fig, gs, snapshots, start_row=current_row)
         
         # Overall title
         fig.suptitle('Richards Equation: Rain Event Simulation\n'
@@ -60,9 +79,9 @@ class ResultsPlotter:
         print(f"\nPlot saved as '{filename}'")
         plt.close()
     
-    def _plot_time_series(self, fig, gs, probe_data, rain_scenario=None, measured_data_csv=None):
-        """Plot time series in top row with optional measured data overlay"""
-        ax = fig.add_subplot(gs[0, :])
+    def _plot_time_series(self, fig, gs, probe_data, rain_scenario=None, measured_data_csv=None, row=0):
+        """Plot time series with optional measured data overlay"""
+        ax = fig.add_subplot(gs[row, :])
         
         times_hours = probe_data['times'] / 3600.0
         time_series = probe_data['data']
@@ -137,9 +156,124 @@ class ResultsPlotter:
         if len(times_hours) > 0:
             ax.set_xlim([0, times_hours[-1]])
         ax.set_ylim([1,2])
+
+    def _plot_residuals(self, fig, gs, probe_data, measured_data_csv, row=1):
+        """
+        Plot residuals (Measured - Simulated) time series
+        
+        Residuals are calculated as: LTC 101 - LTC 1, LTC 102 - LTC 2, LTC 103 - LTC 3
+        Uses interpolation to match measured and simulated time points
+        """
+        ax = fig.add_subplot(gs[row, :])
+        
+        # Load measured data
+        measured_data = self._load_measured_data(measured_data_csv)
+        if measured_data is None:
+            ax.text(0.5, 0.5, 'Measured data not available', 
+                   ha='center', va='center', fontsize=14)
+            ax.set_title('Residuals (Measured - Simulated)', fontsize=14, fontweight='bold')
+            return
+        
+        times_hours_sim = probe_data['times'] / 3600.0
+        time_series_sim = probe_data['data']
+        
+        times_hours_meas = measured_data['times'] * 24.0  # Convert days to hours
+        
+        colors = ['#1f77b4', '#2ca02c', '#d62728']
+        ltc_numbers = [1, 2, 3]  # LTC probe numbers
+        ltc_measured_names = ['LTC 101', 'LTC 102', 'LTC 103']
+        
+        # Debug: print available probe names
+        print("\n=== Residuals Calculation Debug ===")
+        print(f"Available simulated probe names: {list(time_series_sim.keys())}")
+        print(f"Available measured data columns: {[k for k in measured_data.keys() if k != 'times']}")
+        
+        # Calculate and plot residuals for each probe
+        for idx, (ltc_num, ltc_meas_name) in enumerate(zip(ltc_numbers, ltc_measured_names)):
+            if ltc_meas_name not in measured_data:
+                print(f"  ⚠️  Skipping {ltc_meas_name}: not in measured data")
+                continue
+            
+            # Find matching simulated probe (look for "LTC {ltc_num}" in probe name)
+            sim_probe_name = None
+            for probe_name in time_series_sim.keys():
+                if f"LTC {ltc_num}" in probe_name:
+                    sim_probe_name = probe_name
+                    break
+            
+            if sim_probe_name is None:
+                print(f"  ⚠️  Skipping LTC {ltc_num}: no matching simulated probe")
+                continue
+            
+            print(f"  ✓ Matching {ltc_meas_name} with {sim_probe_name}")
+            
+            sim_data = np.array(time_series_sim[sim_probe_name])
+            meas_data = measured_data[ltc_meas_name]
+            
+            # Interpolate both to a common time grid (use measured time points)
+            # This assumes measured data is sparser than simulated
+            
+            # Create interpolator for simulated data
+            sim_interp = interp1d(times_hours_sim, sim_data, 
+                                 kind='linear', bounds_error=False, fill_value='extrapolate')
+            
+            # Evaluate simulated data at measured time points
+            sim_at_meas_times = sim_interp(times_hours_meas)
+            
+            # Calculate residuals: Measured - Simulated
+            residuals = meas_data - sim_at_meas_times
+            
+            print(f"    Residual range: [{np.min(residuals):.4f}, {np.max(residuals):.4f}] m")
+            
+            # Plot residuals
+            marker_every = max(1, len(times_hours_meas) // 30)
+            ax.plot(times_hours_meas, residuals, 
+                   color=colors[idx],
+                   linewidth=2.5, 
+                   label=f'{ltc_meas_name} - LTC {ltc_num}',
+                   marker='o',
+                   markersize=4,
+                   markevery=marker_every,
+                   alpha=0.85)
+        
+        print("=== End Debug ===\n")
+        
+        # Zero reference line
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=1.5, 
+                  label='Perfect match', alpha=0.5)
+        
+        # Formatting
+        ax.set_ylabel('Residual (m)\n[Measured - Simulated]', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Time (hours)', fontsize=12, fontweight='bold')
+        ax.set_title('Residuals Analysis: Measured vs Simulated Water Level', 
+                    fontsize=14, fontweight='bold', pad=15)
+        
+        # Handle legend
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys(), 
+                 loc='center left', bbox_to_anchor=(1.01, 0.5), 
+                 fontsize=10, framealpha=0.95, borderaxespad=0)
+        
+        ax.grid(True, alpha=0.3, linestyle='--')
+        
+        # Set limits
+        if len(times_hours_meas) > 0:
+            ax.set_xlim([0, times_hours_meas[-1]])
+            
+        # Auto-scale y-axis but add some padding
+        ax.margins(y=0.1)
     
-    def _plot_snapshots(self, fig, gs, snapshots):
-        """Plot spatial snapshots in middle and bottom rows"""
+    def _plot_snapshots(self, fig, gs, snapshots, start_row=2):
+        """
+        Plot spatial snapshots in 2 rows × 3 columns grid
+        
+        Args:
+            fig: Figure object
+            gs: GridSpec object
+            snapshots: Dictionary of snapshots
+            start_row: Starting row index in the grid (default 2)
+        """
         sorted_times = sorted(snapshots.keys())
         
         # Take exactly what we have, up to 6 unique times
@@ -158,7 +292,8 @@ class ResultsPlotter:
         plotted_times = set()
         
         for idx, snap_time in enumerate(selected_times):
-            row = 1 + idx // 3
+            # Calculate row and column: 2 rows × 3 columns starting at start_row
+            row = start_row + idx // 3
             col = idx % 3
             ax = fig.add_subplot(gs[row, col])
             

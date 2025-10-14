@@ -13,8 +13,8 @@ def main():
     # ==========================================
     config = SimulationConfig(
         # You can modify config parameters here if needed
-        dt=1800,
-        t_end=30*24*3600,
+        dt=300,
+        t_end=2*24*3600,
         monitor_x_positions=[8.0, 10.0, 12.5],
     )
     # ==========================================
@@ -25,12 +25,10 @@ def main():
         RainZone(x_min=9.0, x_max=11.0, multiplier=6.0, name="green_infrastructure"),
     ]
 
-    rain_scenario = RainScenario.from_csv(
-        "RAF_rain_short.csv",
-        time_col='day',
-        rain_col='rain (mm)',
-        time_unit="days",
-        rain_type="rate",
+    rain_event = RainScenario.single_event(
+        start_hours=5.0,
+        end_hours=10.0,
+        intensity_mm_hr=20.0,
         zones=rain_zones
     )
 
@@ -65,15 +63,26 @@ def main():
     probe_names = [f"LTC {i+1} (x={x:.1f}m)" for i, x in enumerate(config.monitor_x_positions)]
     probe_manager = ProbeManager(mesh, config.monitor_x_positions, probe_names)
     
+    # Define 6 snapshot times (in seconds)
+    snapshot_times = [
+        0.0,
+        5*3600.0,   # End of rain
+        config.t_end * 0.1,
+        config.t_end * 0.3,
+        config.t_end * 0.7,
+        config.t_end 
+    ]
+    snapshot_manager = SnapshotManager(snapshot_times, domain)
+    
     # ==========================================
     # 6. CREATE SOLVER
     # ==========================================
-    solver = RichardsSolver(mesh, V, domain, rain_scenario, bc_manager, config)
+    solver = RichardsSolver(mesh, V, domain, rain_event, bc_manager, config)
         
     # ==========================================
     # 7. RUN SIMULATION
     # ==========================================
-    solver.run(probe_manager)
+    solver.run(probe_manager, snapshot_manager)
     
     # ==========================================
     # 8. VISUALIZE RESULTS
@@ -83,18 +92,37 @@ def main():
     plotter = ResultsPlotter(config, mesh)
     plotter.plot_complete_results(
         probe_data=probe_manager.get_data(),
-        rain_scenario=rain_scenario,
-        filename=config.output_dir / f'richards_simulation_{now}_RESIDUALS.png',
+        snapshots=snapshot_manager.snapshots,
+        rain_scenario=rain_event,
+        filename=config.output_dir / f'richards_simulation_{now}_TEST.png',
         measured_data_csv='RAF_PZ_CG.csv',  # Optional: overlay measured data
-        plot_residuals=True  # Plot residuals (Measured - Simulated)
+        plot_residuals=False  # Plot residuals (Measured - Simulated)
     )
+    
+    # ==========================================
+    # 9. CREATE GIF ANIMATION (OPTIONAL)
+    # ==========================================
+    from visualization import GifAnimator
+    plot_gif_animation = False
+    if plot_gif_animation:
+        animator = GifAnimator(snapshot_manager.snapshots, config, mesh)
+        animator.create_animation(
+            field_name='saturation',
+            filename='results/saturation_evolution.gif',
+            fps=2,  # 2 frames per second
+            dpi=100,
+            cmap='Blues',
+            clabel='Saturation',
+            vmin=0,
+            vmax=1
+        )
 
     # ==========================================
     # 10. SAVE PROBE DATA TO CSV
     # ==========================================
-    save_prob_data = True
+    save_prob_data = False
     if save_prob_data:
-        probe_manager.save_to_csv("all_RAF_rain_modeled_V1.csv", reference_elevation=5.0)
+        probe_manager.save_to_csv("water_table_data.csv", reference_elevation=5.0)
 
 if __name__ == "__main__":
     main()
