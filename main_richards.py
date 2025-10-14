@@ -1,4 +1,4 @@
-from firedrake import RectangleMesh, FunctionSpace
+from firedrake import *
 from config import SimulationConfig
 from physics import *
 from solver import *
@@ -13,7 +13,7 @@ def main():
     config = SimulationConfig(
         # You can modify config parameters here if needed
         dt=3600,
-        t_end=30*24*3600,
+        t_end=1*24*3600,
         monitor_x_positions=[8.0, 10.0, 12.5],
     )
     # ==========================================
@@ -23,14 +23,15 @@ def main():
         RainZone(x_min=0.0, x_max=8.0, multiplier=1.0, name="grass"),
         RainZone(x_min=9.0, x_max=11.0, multiplier=6.0, name="green_infrastructure"),
     ]
-    rain_scenario = RainScenario.single_event(
+
+    rain_event = RainScenario.single_event(
         start_hours=5.0,
         end_hours=10.0,
         intensity_mm_hr=20.0,
         zones=rain_zones
     )
 
-    rain_scenario_csv = RainScenario.from_csv(
+    rain_csv = RainScenario.from_csv(
         "RAF_rain_short.csv",
         time_col='day',
         rain_col='rain (mm)',
@@ -38,6 +39,8 @@ def main():
         rain_type="rate",
         zones=rain_zones
     )
+
+    rain_scenario = rain_event
 
     # ==========================================
     # 3. CREATE MESH WITH MATERIALS
@@ -84,7 +87,7 @@ def main():
     # ==========================================
     # 6. CREATE SOLVER
     # ==========================================
-    solver = RichardsSolver(mesh, V, domain, rain_scenario_csv, bc_manager, config)
+    solver = RichardsSolver(mesh, V, domain, rain_scenario, bc_manager, config)
         
     # ==========================================
     # 7. RUN SIMULATION
@@ -99,7 +102,7 @@ def main():
     plotter.plot_complete_results(
         probe_data=probe_manager.get_data(),
         snapshots=snapshot_manager.snapshots,
-        rain_scenario=rain_scenario_csv
+        rain_scenario=rain_scenario
     )
 
     # Save probe data to CSV

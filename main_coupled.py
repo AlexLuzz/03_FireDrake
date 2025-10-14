@@ -1,4 +1,4 @@
-from firedrake import RectangleMesh, FunctionSpace, Constant, conditional, SpatialCoordinate
+from firedrake import *
 from config import SimulationConfig
 from physics import *
 from solver import *
@@ -12,7 +12,7 @@ def main():
     # ==========================================
     config = SimulationConfig(
         dt=600,  # 10 minutes for Richards (transport will sub-step)
-        t_end=150*3600,
+        t_end=10*3600,
         monitor_x_positions=[8.0, 10.0, 12.5],
     )
     
@@ -51,18 +51,35 @@ def main():
     V = FunctionSpace(mesh, "CG", 1)
     
     # ==========================================
-    # 4. CREATE RICHARDS SOLVER
+    # 4. CREATE BOUNDARY CONDITION MANAGER
     # ==========================================
     bc_manager = BoundaryConditionManager(V, config)
 
+    # ==========================================
+    # 5. CREATE MONITORING
+    # ==========================================
+    probe_names = [f"LTC {i+1} (x={x:.1f}m)" for i, x in enumerate(config.monitor_x_positions)]
+    probe_manager = ProbeManager(mesh, config.monitor_x_positions, probe_names)
+    
+    # Define 6 snapshot times (in seconds)
+    snapshot_times = [
+        0.0,
+        5*3600.0,   # End of rain
+        config.t_end * 0.1,
+        config.t_end * 0.3,
+        config.t_end * 0.7,
+        config.t_end 
+    ]
+    snapshot_manager = SnapshotManager(snapshot_times, domain)
+    
+    # ==========================================
+    # 6. CREATE SOLVER
+    # ==========================================
     richards_solver = RichardsSolver(mesh, V, domain, rain_scenario, bc_manager, config)
-    
-    print("✓ Richards solver created")
-    
+        
     # ==========================================
-    # 5. CREATE CHLORIDE TRANSPORT SOLVER
+    # 7. CREATE CHLORIDE TRANSPORT SOLVER
     # ==========================================
-    print("\nSetting up chloride transport...")
     
     # Porous media properties
     porous_props = {
@@ -79,87 +96,36 @@ def main():
         'include_adsorption': False
     }
     
-    transport_solver = ChlorideTransport(mesh, porous_props, transport_props)
+    transport_solver = ChlorideTransport(mesh, porous_props, transport_props, bc_manager)
     
     # Initial chloride concentration: source at green infrastructure
     x, y = SpatialCoordinate(mesh)
-    c_init = conditional(
-        (x >= 9.0) & (x <= 11.0) & (y >= 4.0),  # Green infrastructure area
+    c_init_expr = conditional(
+        And(And(x >= 9.0, x <= 11.0), y >= 4.0),  # Green infrastructure area
         Constant(100.0),  # 100 mol/m³
-        Constant(0.0)     # Clean elsewhere
+        Constant(0.0)    # Clean elsewhere
     )
-    transport_solver.set_initial_condition(c_init)
     
-    print("✓ Chloride transport solver created")
-    print(f"  - Initial concentration: 100 mol/m³ at green infrastructure")
-    print(f"  - Molecular diffusion: {transport_props['molecular_diffusion']:.2e} m²/s")
-    print(f"  - Dispersivity: αL={transport_props['longitudinal_dispersivity']}m, "
-          f"αT={transport_props['transverse_dispersivity']}m")
+    transport_solver.c.interpolate(c_init_expr)
     
     # ==========================================
-    # 6. CREATE COUPLED SOLVER
+    # 8. CREATE COUPLED SOLVER
     # ==========================================
-    print("\nCreating coupled flow-transport solver...")
     coupled_solver = CoupledFlowTransport(richards_solver, transport_solver)
-    
-    print("✓ Coupled solver created")
-    
-    # ==========================================
-    # 7. CREATE MONITORING
-    # ==========================================
-    print("\nSetting up monitoring...")
-    
-    probe_names = [f"LTC {i+1} (x={x:.1f}m)" for i, x in enumerate(config.monitor_x_positions)]
-    probe_manager = ProbeManager(mesh, config.monitor_x_positions, probe_names)
-    
-    # Define 6 snapshot times (in seconds)
-    snapshot_times = [
-        0.0,
-        5*3600.0,   # End of rain
-        config.t_end * 0.1,
-        config.t_end * 0.3,
-        config.t_end * 0.7,
-        config.t_end 
-    ]
-    snapshot_manager = SnapshotManager(snapshot_times, domain)
-    
-    print(f"✓ Monitoring: {len(probe_names)} probes, {len(snapshot_times)} snapshots")
-    
-    # ==========================================
-    # 8. BOUNDARY CONDITIONS FOR TRANSPORT
-    # ==========================================
-    # Chloride BC: constant concentration at green infrastructure surface
-    transport_bc = {
-        3: Constant(100.0)  # Top boundary (ds(3))
-    }
-    
+        
     # ==========================================
     # 9. RUN COUPLED SIMULATION
     # ==========================================
-    print("\n" + "=" * 70)
-    print("STARTING COUPLED SIMULATION")
-    print("=" * 70 + "\n")
-    
     results = coupled_solver.run(
         t_end=config.t_end,
-        dt_richards=config.dt,  # 10 minutes for Richards
-        dt_transport=300.0,     # 5 minutes for transport (sub-stepping)
-        transport_bc=transport_bc,
-        dirichlet_bcs=None,  # No Dirichlet BC for Richards
-        output_interval=3600.0,  # Save every hour
+        dt=config.dt,  # 10 minutes for Richards
         probe_manager=probe_manager,
         snapshot_manager=snapshot_manager,
-        print_diagnostics=True
     )
     
     # ==========================================
     # 10. VISUALIZE FLOW RESULTS
     # ==========================================
-    print("\n" + "=" * 70)
-    print("VISUALIZATION")
-    print("=" * 70)
-    
-    print("\nCreating flow visualization...")
     plotter = ResultsPlotter(config, mesh)
     plotter.plot_complete_results(
         probe_data=probe_manager.get_data(),
@@ -171,9 +137,7 @@ def main():
     # ==========================================
     # 11. VISUALIZE TRANSPORT RESULTS
     # ==========================================
-    print("\nCreating transport visualization...")
-    
-    # Simple concentration plot
+
     import matplotlib.pyplot as plt
     import numpy as np
     from scipy.interpolate import LinearNDInterpolator

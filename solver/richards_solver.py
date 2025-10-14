@@ -96,7 +96,7 @@ class RichardsSolver:
         
         return flux_expr
 
-    def solve_timestep(self, t: float, bcs=None):
+    def solve_timestep(self, t: float):
         """
         Solve one time step
         
@@ -108,36 +108,40 @@ class RichardsSolver:
         self._update_coefficients()
         
         # Get boundary conditions
-        bcs = self.bc_manager.get_dirichlet_bcs(t)
+        bcs = self.bc_manager.get_dirichlet_bcs()
         
         # Get rain flux expression
         rain_flux = self.get_rain_flux_expression(t)
         
         # Define variational problem
-        p = TrialFunction(self.V)
-        q = TestFunction(self.V)
-        
+        p = TrialFunction(self.V)  # Unknown pressure head (to solve for)
+        q = TestFunction(self.V)   # Test function (mathematical trick for FEM)
+
         # Compute K field (K = kr * Ks)
+        # Linearization: use K from previous time step (known values)
         K_field = self.kr_n * self.Ks_field
 
         # Gravity vector (vertical direction)
-        gravity = as_vector([0, 1])
-        
-        # Weak form with GRAVITY term:
-        # Cm*(p-p_n)/dt + K*∇p·∇q + K*∇z·∇q = rain_flux*q
-        # where ∇z·∇q = ∂q/∂y (vertical derivative)
-        F = (self.Cm_n * (p - self.p_n) / self.config.dt * q * dx +
-             K_field * dot(grad(p), grad(q)) * dx +
-             K_field * dot(gravity, grad(q)) * dx +
-             rain_flux * q * ds(4))  # ds(4) is top boundary
-        
-        a = lhs(F)
-        L = rhs(F)
-        
-        # Solve
-        solve(a == L, self.p_new, bcs=bcs, 
-              solver_parameters=self.config.solver_parameters)
-        
+        gravity = as_vector([0, 1])  # ∇z = (0, 1) since z = y
+
+        # Weak form of Richards equation: C·∂Hp/∂t = ∇·[K(∇Hp + ∇z)]
+        # After integration by parts and time discretization:
+        F = (self.Cm_n * (p - self.p_n) / self.config.dt * q * dx +  # Time derivative: C(Hp-Hp_n)/Δt
+            K_field * dot(grad(p), grad(q)) * dx +                   # Diffusion: K∇Hp·∇q
+            K_field * dot(gravity, grad(q)) * dx +                   # Gravity: K∇z·∇q
+            rain_flux * q * ds(4))  # Infiltration source on top boundary
+
+        # Split residual form F=0 into linear system a=L
+        # lhs: extracts terms with unknown p → matrix A
+        # rhs: extracts known terms (p_n, sources) → vector b
+        a = lhs(F)  # Bilinear form: a(p,q) - contains both p and q
+        L = rhs(F)  # Linear form: L(q) - contains only q (negated from F)
+
+        # Solve linear system A·p_new = b
+        # The nonlinear problem is linearized using known values (Cm_n, K_field)
+        solve(a == L, self.p_new, bcs=bcs,
+            solver_parameters=self.config.solver_parameters)
+
         # Update for next time step
         self.p_n.assign(self.p_new)
     

@@ -43,7 +43,7 @@ class BoundaryConditionManager:
         
         return hydro_func
     
-    def get_dirichlet_bcs(self, t: float) -> list:
+    def get_dirichlet_bcs(self) -> list:
         """
         Get Dirichlet boundary conditions for current time
         Applies hydraulic head on left and right boundaries (COMSOL style)
