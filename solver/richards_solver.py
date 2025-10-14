@@ -171,11 +171,11 @@ class RichardsSolver:
             
             # Record at monitoring points
             probe_manager.record(t, self.p_new)
-            
-            # Save snapshots
+
+            # During simulation
             if snapshot_manager.should_record(t, self.config.dt):
-                snapshot_manager.record(t, self.p_new)
-            
+                snapshot_manager.record(t, self.p_new)  # Main snapshots
+
             # Print progress every hour
             if step % int(3600/self.config.dt) == 0:
                 print(f"Time: {t/3600:.1f}h / {self.config.t_end/3600:.1f}h")

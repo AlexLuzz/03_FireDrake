@@ -11,8 +11,8 @@ def main():
     # 1. CONFIGURATION
     # ==========================================
     config = SimulationConfig(
-        dt=600,  # 10 minutes for Richards (transport will sub-step)
-        t_end=10*3600,
+        dt=3600, 
+        t_end=100*3600,
         monitor_x_positions=[8.0, 10.0, 12.5],
     )
     
@@ -24,9 +24,9 @@ def main():
         RainZone(x_min=9.0, x_max=11.0, multiplier=6.0, name="green_infrastructure"),
     ]
     rain_scenario = RainScenario.single_event(
-        start_hours=3.0,
-        end_hours=5.0,
-        intensity_mm_hr=20.0,
+        start_hours=5.0,
+        end_hours=15.0,
+        intensity_mm_hr=200.0,
         zones=rain_zones
     )
 
@@ -90,8 +90,8 @@ def main():
     # Transport properties for chloride
     transport_props = {
         'molecular_diffusion': 2.03e-9,  # Cl- at 25°C (m²/s)
-        'longitudinal_dispersivity': 0.05,  # 5 cm
-        'transverse_dispersivity': 0.005,  # 5 mm
+        'longitudinal_dispersivity': 0.1,  # 5 cm
+        'transverse_dispersivity': 0.001,  # 5 mm
         'tortuosity': 'millington_quirk',
         'include_adsorption': False
     }

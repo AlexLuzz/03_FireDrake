@@ -1,3 +1,4 @@
+from datetime import datetime
 from firedrake import *
 from config import SimulationConfig
 from physics import *
@@ -13,7 +14,7 @@ def main():
     config = SimulationConfig(
         # You can modify config parameters here if needed
         dt=3600,
-        t_end=1*24*3600,
+        t_end=30*24*3600,
         monitor_x_positions=[8.0, 10.0, 12.5],
     )
     # ==========================================
@@ -40,7 +41,7 @@ def main():
         zones=rain_zones
     )
 
-    rain_scenario = rain_event
+    rain_scenario = rain_csv
 
     # ==========================================
     # 3. CREATE MESH WITH MATERIALS
@@ -97,16 +98,41 @@ def main():
     # ==========================================
     # 8. VISUALIZE RESULTS
     # ==========================================
-    print("Creating visualization...")
+    now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
     plotter = ResultsPlotter(config, mesh)
     plotter.plot_complete_results(
         probe_data=probe_manager.get_data(),
         snapshots=snapshot_manager.snapshots,
-        rain_scenario=rain_scenario
+        rain_scenario=rain_scenario,
+        filename=config.output_dir / f'richards_simulation_{now}_TEST.png',
+        measured_data_csv='RAF_PZ_CG.csv'  # Optional: overlay measured data
     )
+    
+    # ==========================================
+    # 9. CREATE GIF ANIMATION (OPTIONAL)
+    # ==========================================
+    from visualization import GifAnimator
+    plot_gif_animation = False
+    if plot_gif_animation:
+        animator = GifAnimator(snapshot_manager.snapshots, config, mesh)
+        animator.create_animation(
+            field_name='saturation',
+            filename='results/saturation_evolution.gif',
+            fps=2,  # 2 frames per second
+            dpi=100,
+            cmap='Blues',
+            clabel='Saturation',
+            vmin=0,
+            vmax=1
+        )
 
-    # Save probe data to CSV
-    probe_manager.save_to_csv("water_table_data_120cm.csv", reference_elevation=5.0)
+    # ==========================================
+    # 10. SAVE PROBE DATA TO CSV
+    # ==========================================
+    save_prob_data = False
+    if save_prob_data:
+        probe_manager.save_to_csv("water_table_data.csv", reference_elevation=5.0)
 
 if __name__ == "__main__":
     main()
