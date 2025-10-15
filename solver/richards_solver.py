@@ -46,7 +46,7 @@ class RichardsSolver:
         """Set initial hydrostatic pressure distribution"""
         coords = self.mesh.coordinates.dat.data
         y_coords = coords[:, 1]
-        water_table = self.config.initial_water_table
+        water_table = self.bc_manager.H0_initial
         
         initial_pressure = np.zeros(len(y_coords))
         for i, y in enumerate(y_coords):
@@ -108,7 +108,7 @@ class RichardsSolver:
         self._update_coefficients()
         
         # Get boundary conditions
-        bcs = self.bc_manager.get_dirichlet_bcs()
+        bcs = self.bc_manager.get_dirichlet_bcs(t)
         
         # Get rain flux expression
         rain_flux = self.get_rain_flux_expression(t)
@@ -179,28 +179,37 @@ class RichardsSolver:
                 if snapshot_manager.should_record(t, self.config.dt):
                     snapshot_manager.record(t, self.p_new)  # Main snapshots
 
-            # Print progress every hour
-            if step % int(3600/self.config.dt) == 0:
-                print(f"Time: {t/3600:.1f}h / {self.config.t_end/3600:.1f}h")
+            # Print progress bar every 5% advancement
+            if step % int(0.05 * self.config.num_steps) == 0:
+                progress = step / self.config.num_steps
+                bar_length = 40
+                filled_length = int(bar_length * progress)
+                bar = '█' * filled_length + '░' * (bar_length - filled_length)
+                print(f"\rProgress: [{bar}] {progress*100:.1f}% | Time: {t/3600:.1f}h / {self.config.t_end/3600:.1f}h", end='', flush=True)
                 
                 # Detailed diagnostics if requested
                 if print_diagnostics:
+                    print()  # New line before diagnostics
                     self.print_diagnostics(t)
                     print()
         
-        print("\nSimulation complete!")
+        print("\n\nSimulation complete!")
         
         # Print probe data summary
         probe_data = probe_manager.get_data()
         print(f"  Total time steps recorded: {len(probe_data['times'])}")
         print(f"  Time range: {probe_data['times'][0]/3600:.2f}h - {probe_data['times'][-1]/3600:.2f}h")
         for name, data in probe_data['data'].items():
-            data_array = np.array(data)
-            valid_data = data_array[~np.isnan(data_array)]
-            if len(valid_data) > 0:
-                print(f"  {name}: {valid_data.min():.3f}m - {valid_data.max():.3f}m ({len(valid_data)}/{len(data_array)} valid)")
-            else:
-                print(f"  {name}: ALL NaN!")
+            # Convert to numpy array, handling potential non-numeric types
+            try:
+                data_array = np.array(data, dtype=float)
+                valid_data = data_array[~np.isnan(data_array)]
+                if len(valid_data) > 0:
+                    print(f"  {name}: {valid_data.min():.3f}m - {valid_data.max():.3f}m ({len(valid_data)}/{len(data_array)} valid)")
+                else:
+                    print(f"  {name}: ALL NaN!")
+            except (ValueError, TypeError) as e:
+                print(f"  {name}: {len(data)} data points (error: {e})")
 
         if snapshot_manager is not None:
             print(f"  Total snapshots recorded: {len(snapshot_manager.snapshots)}")

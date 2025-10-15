@@ -98,14 +98,15 @@ class RainScenario:
     
     @classmethod
     def from_csv(cls, csv_path: str, 
-                 time_col: str = "time_hours", 
-                 rain_col: str = "intensity_mm_hr",
-                 time_unit: str = "hours",
-                 rain_type: str = "rate",
-                 zones: List[RainZone] = None,
-                 delimiter: str = None):
+             start_from: float = 0.0,
+             time_col: str = "time_hours", 
+             rain_col: str = "intensity_mm_hr",
+             time_unit: str = "hours",
+             rain_unit: str = "mm/hour",
+             zones: List[RainZone] = None,
+             delimiter: str = None):
         """
-        Load rain events from CSV file with flexible column names and units
+        Load rain events from CSV file
         
         CSV format example:
             time_hours, intensity_mm_hr
@@ -117,125 +118,113 @@ class RainScenario:
         
         Args:
             csv_path: Path to CSV file
+            start_from: Start simulation from this time value (in time_unit)
+                        Example: start_from=100 with time_unit="days" → starts at day 100
             time_col: Name of time column in CSV
-            rain_col: Name of rain column in CSV (always in mm)
-            time_unit: Unit of time column - "hours" or "days"
-            rain_type: Type of rain data - "rate" (mm/hour) or "depth" (cumulative mm)
+            rain_col: Name of rain column in CSV
+            time_unit: "hours" or "days"
+            rain_unit: "mm/hour" or "mm/day" (rain intensity)
             zones: Optional spatial zones (default: entire domain)
-            delimiter: CSV delimiter (default: auto-detect from first line)
+            delimiter: CSV delimiter (default: auto-detect)
         
         Returns:
-            RainScenario object
+            RainScenario object with time shifted to start at t=0
         
         Examples:
-            # Default: time in hours, rain rate in mm/hr
+            # Standard hourly data
             scenario = RainScenario.from_csv("rain.csv")
             
-            # Time in days, rain rate in mm/day
-            scenario = RainScenario.from_csv(
-                "rain.csv", 
-                time_col="Day", 
-                rain_col="Rainfall_mm_day",
-                time_unit="days",
-                rain_type="rate"
-            )
-            
-            # Time in hours, cumulative rain depth in mm
+            # Daily data, start from day 100
             scenario = RainScenario.from_csv(
                 "rain.csv",
-                time_col="Time_h",
-                rain_col="Cumulative_mm",
-                time_unit="hours",
-                rain_type="depth"
+                start_from=100.0,
+                time_col="day",
+                rain_col="rain_mm_day",
+                time_unit="days",
+                rain_unit="mm/day"
             )
         """
-        # Auto-detect delimiter if not specified
+        import csv
+        
+        # Auto-detect delimiter
         if delimiter is None:
             with open(csv_path, 'r', encoding='utf-8-sig') as f:
                 first_line = f.readline()
-                if ';' in first_line:
-                    delimiter = ';'
-                elif ',' in first_line:
-                    delimiter = ','
-                elif '\t' in first_line:
-                    delimiter = '\t'
-                else:
-                    delimiter = ','  # default
+                delimiter = ';' if ';' in first_line else ','
         
-        # Read CSV using standard library with UTF-8 BOM handling
+        # Read CSV
         with open(csv_path, 'r', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f, delimiter=delimiter)
-            rows = list(reader)
+            rows = [{k.strip(): v for k, v in row.items()} for row in reader]
         
-        # Strip whitespace from column names (common issue)
-        if rows:
-            rows = [{k.strip(): v for k, v in row.items()} for row in rows]
+        if not rows:
+            raise ValueError(f"Empty CSV file: {csv_path}")
         
-        # Helper function to parse floats with comma or dot as decimal separator
-        def parse_float(value_str):
-            """Parse float that might use comma as decimal separator"""
-            return float(value_str.strip().replace(',', '.'))
+        # Helper: parse float with comma or dot decimal separator
+        def parse_float(s):
+            return float(s.strip().replace(',', '.'))
         
-        # Extract raw data with better error messages
+        # Extract data with error handling
         try:
             times_raw = np.array([parse_float(row[time_col]) for row in rows])
-        except KeyError:
-            available_cols = list(rows[0].keys()) if rows else []
-            raise KeyError(f"Column '{time_col}' not found in CSV. "
-                         f"Available columns: {available_cols}")
-        
-        try:
             rain_raw = np.array([parse_float(row[rain_col]) for row in rows])
-        except KeyError:
-            available_cols = list(rows[0].keys()) if rows else []
-            raise KeyError(f"Column '{rain_col}' not found in CSV. "
-                         f"Available columns: {available_cols}")
+        except KeyError as e:
+            available = list(rows[0].keys())
+            raise KeyError(f"Column {e} not found. Available: {available}")
         
         # Convert time to hours
-        if time_unit.lower() in ["hours", "hour", "h"]:
-            times = times_raw
-        elif time_unit.lower() in ["days", "day", "d"]:
-            times = times_raw * 24.0
+        time_unit = time_unit.lower()
+        if time_unit in ["hours", "hour", "h"]:
+            times_hours = times_raw
+        elif time_unit in ["days", "day", "d"]:
+            times_hours = times_raw * 24.0
+            start_from_hours = start_from * 24.0
         else:
-            raise ValueError(f"Unknown time unit '{time_unit}'. Supported: 'hours', 'days'")
+            raise ValueError(f"Invalid time_unit '{time_unit}'. Use 'hours' or 'days'")
         
-        # Convert rain data to intensity (mm/hr)
-        if rain_type.lower() == "rate":
-            # Already a rate, just need to convert from mm/time_unit to mm/hr
-            if time_unit.lower() in ["hours", "hour", "h"]:
-                intensities = rain_raw  # Already mm/hr
-            elif time_unit.lower() in ["days", "day", "d"]:
-                intensities = rain_raw / 24.0  # mm/day to mm/hr
-        elif rain_type.lower() == "depth":
-            # Cumulative depth - calculate rate from differences
-            intensities = np.zeros_like(rain_raw)
-            for i in range(1, len(rain_raw)):
-                dt = times[i] - times[i-1]  # in hours
-                if dt > 0:
-                    depth_increment = rain_raw[i] - rain_raw[i-1]
-                    intensities[i] = depth_increment / dt  # mm/hr
-            intensities[0] = 0.0  # First point has no rate
+        # Filter data: only keep times >= start_from
+        if time_unit in ["days", "day", "d"]:
+            start_from_hours = start_from * 24.0
         else:
-            raise ValueError(f"Unknown rain_type '{rain_type}'. Supported: 'rate', 'depth'")
+            start_from_hours = start_from
         
-        # Find rain events (periods with non-zero intensity)
+        mask = times_hours >= start_from_hours
+        times_hours = times_hours[mask]
+        rain_raw = rain_raw[mask]
+        
+        if len(times_hours) == 0:
+            raise ValueError(f"No data after start_from={start_from} {time_unit}")
+        
+        # Shift time to start at t=0
+        times_hours = times_hours - times_hours[0]
+        
+        # Convert rain to mm/hour
+        rain_unit = rain_unit.lower().replace('/', '')  # "mm/hour" → "mmhour"
+        if rain_unit in ["mmhour", "mm_hour", "mmh"]:
+            intensities = rain_raw  # Already mm/hour
+        elif rain_unit in ["mmday", "mm_day", "mmd"]:
+            intensities = rain_raw / 24.0  # mm/day → mm/hour
+        else:
+            raise ValueError(f"Invalid rain_unit '{rain_unit}'. Use 'mm/hour' or 'mm/day'")
+        
+        # Build rain events (periods with constant non-zero intensity)
         events = []
         in_event = False
         event_start = None
         current_intensity = 0.0
         
-        for i in range(len(times)):
-            t = times[i]
+        for i in range(len(times_hours)):
+            t = times_hours[i]
             intensity = intensities[i]
             
             if intensity > 0 and not in_event:
-                # Start of new event
+                # Start new event
                 in_event = True
                 event_start = t
                 current_intensity = intensity
             
             elif intensity <= 0 and in_event:
-                # End of event
+                # End event
                 events.append(RainEvent(
                     start_time=event_start,
                     end_time=t,
@@ -245,8 +234,8 @@ class RainScenario:
                 ))
                 in_event = False
             
-            elif in_event and intensity != current_intensity:
-                # Intensity changed - end old event, start new one
+            elif in_event and abs(intensity - current_intensity) > 1e-6:
+                # Intensity changed - close old event, start new
                 events.append(RainEvent(
                     start_time=event_start,
                     end_time=t,
@@ -256,6 +245,21 @@ class RainScenario:
                 ))
                 event_start = t
                 current_intensity = intensity
+        
+        # Close final event if still active
+        if in_event:
+            events.append(RainEvent(
+                start_time=event_start,
+                end_time=times_hours[-1],
+                intensity=current_intensity,
+                zones=zones,
+                name=f"event_{len(events)+1}"
+            ))
+        
+        print(f"Loaded rain scenario from {csv_path}")
+        print(f"  Start time: {start_from} {time_unit} (shifted to t=0)")
+        print(f"  Duration: {times_hours[-1]/24:.1f} days")
+        print(f"  Events found: {len(events)}")
         
         return cls(events)
     

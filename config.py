@@ -1,14 +1,14 @@
 """
 Configuration module for Richards equation simulation
-Contains all global simulation parameters
+Contains domain geometry, time stepping, and solver parameters
 """
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 @dataclass
 class SimulationConfig:
-    """Global simulation configuration"""
+    """Global simulation configuration - geometry, time, and numerics"""
     
     # Identification
     name: str = "Richards_Rain_Event"
@@ -25,14 +25,13 @@ class SimulationConfig:
     t_end: float = 168 * 3600    # End time (seconds)
     num_steps: int = field(init=False)
     
-    # Physical parameters (not soil-specific)
+    # Physical constants
     g: float = 9.81             # Gravity (m/s^2)
-    initial_water_table: float = 1.2  # Initial water table height (m)
     
     # Numerical parameters
     epsilon: float = 0.05     # Smoothing parameter near water table (m)
     kr_min: float = 0.03      # Minimum relative permeability
-    Ss: float = 1e-2            # Specific storage coefficient (1/m)
+    Ss: float = 1e-2          # Specific storage coefficient (1/m)
     
     # Monitoring points
     monitor_x_positions: List[float] = field(default_factory=lambda: [8.0, 10.0, 12.5])
@@ -43,17 +42,19 @@ class SimulationConfig:
     
     # Solver parameters
     solver_type: str = 'gmres'
-    preconditioner: str = 'ilu'
-    rtol: float = 1e-4
-    atol: float = 1e-6
+    preconditioner: str = 'hypre'  # 'ilu' for small, 'hypre' for large
+    preconditioner_type: str = 'boomeramg'
+    rtol: float = 1e-5
+    atol: float = 1e-7
     max_iter: int = 100
     
     @property
     def solver_parameters(self):
-        """Return solver parameters as dict for Firedrake"""
+        """Return solver parameters dict for Firedrake"""
         return {
             'ksp_type': self.solver_type,
             'pc_type': self.preconditioner,
+            'pc_hypre_type': self.preconditioner_type,
             'ksp_rtol': self.rtol,
             'ksp_atol': self.atol,
             'ksp_max_it': self.max_iter

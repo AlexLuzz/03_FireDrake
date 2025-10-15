@@ -13,7 +13,7 @@ def main():
     # ==========================================
     config = SimulationConfig(
         # You can modify config parameters here if needed
-        dt=1800,
+        dt=4*3600,
         t_end=30*24*3600,
         monitor_x_positions=[8.0, 10.0, 12.5],
     )
@@ -25,12 +25,15 @@ def main():
         RainZone(x_min=9.0, x_max=11.0, multiplier=6.0, name="green_infrastructure"),
     ]
 
+    start_from = 10
+
     rain_scenario = RainScenario.from_csv(
-        "RAF_rain_short.csv",
+        "RAF_rain.csv",
+        start_from=start_from,
         time_col='day',
         rain_col='rain (mm)',
         time_unit="days",
-        rain_type="rate",
+        rain_unit="mm/day",
         zones=rain_zones
     )
 
@@ -40,7 +43,7 @@ def main():
     till = SoilMaterial.from_curves(name="Till")
     terreau = SoilMaterial.from_curves(name="Terreau")
 
-    mesh = RectangleMesh(80, 40, 20.0, 5.0)
+    mesh = RectangleMesh(100, 50, 20.0, 5.0)
     
     # Create domain with Till as base material
     domain = Domain.homogeneous(mesh, till)
@@ -57,7 +60,11 @@ def main():
     # ==========================================
     # 4. CREATE BOUNDARY CONDITION MANAGER
     # ==========================================
-    bc_manager = BoundaryConditionManager(V, config)
+    bc_manager = BoundaryConditionManager(
+        V,
+        initial_water_table=1.2,
+        #water_table_trend={'t_end': 315*86400, 'H0_end': 1.0}
+    )
     
     # ==========================================
     # 5. CREATE MONITORING
@@ -65,6 +72,18 @@ def main():
     probe_names = [f"LTC {i+1} (x={x:.1f}m)" for i, x in enumerate(config.monitor_x_positions)]
     probe_manager = ProbeManager(mesh, config.monitor_x_positions, probe_names)
     
+    # Define 6 snapshot times (in seconds)
+    snapshot_times = [
+        0.0,
+        5*3600.0,   # End of rain
+        config.t_end * 0.1,
+        config.t_end * 0.3,
+        config.t_end * 0.7,
+        config.t_end 
+    ]
+    #snapshot_manager = SnapshotManager(snapshot_times, domain)
+    snapshot_manager = None
+
     # ==========================================
     # 6. CREATE SOLVER
     # ==========================================
@@ -73,7 +92,9 @@ def main():
     # ==========================================
     # 7. RUN SIMULATION
     # ==========================================
-    solver.run(probe_manager)
+    solver.run(probe_manager, 
+               snapshot_manager if snapshot_manager is not None else None
+               )
     
     # ==========================================
     # 8. VISUALIZE RESULTS
@@ -83,16 +104,18 @@ def main():
     plotter = ResultsPlotter(config, mesh)
     plotter.plot_complete_results(
         probe_data=probe_manager.get_data(),
+        snapshots=snapshot_manager.snapshots if snapshot_manager is not None else None,
         rain_scenario=rain_scenario,
-        filename=config.output_dir / f'richards_simulation_{now}_RESIDUALS.png',
-        measured_data_csv='RAF_PZ_CG.csv',  # Optional: overlay measured data
-        plot_residuals=True  # Plot residuals (Measured - Simulated)
+        filename=config.output_dir / f'RAF_rains_{now}.png',
+        comsol_data_file='RAF_PZ_CG.csv',  # Optional: overlay measured data
+        plot_residuals=True,  # Plot residuals (Measured - Simulated)
+        start_from=start_from
     )
 
     # ==========================================
     # 10. SAVE PROBE DATA TO CSV
     # ==========================================
-    save_prob_data = True
+    save_prob_data = False  # Set to True to save probe data
     if save_prob_data:
         probe_manager.save_to_csv("all_RAF_rain_modeled_V1.csv", reference_elevation=5.0)
 

@@ -13,8 +13,8 @@ def main():
     # ==========================================
     config = SimulationConfig(
         # You can modify config parameters here if needed
-        dt=300,
-        t_end=2*24*3600,
+        dt=3600,
+        t_end=15*24*3600,
         monitor_x_positions=[8.0, 10.0, 12.5],
     )
     # ==========================================
@@ -94,9 +94,7 @@ def main():
         probe_data=probe_manager.get_data(),
         snapshots=snapshot_manager.snapshots,
         rain_scenario=rain_event,
-        filename=config.output_dir / f'richards_simulation_{now}_TEST.png',
-        measured_data_csv='RAF_PZ_CG.csv',  # Optional: overlay measured data
-        plot_residuals=False  # Plot residuals (Measured - Simulated)
+        filename=config.output_dir / f'rain_simulation_{now}_TEST.png',
     )
     
     # ==========================================
