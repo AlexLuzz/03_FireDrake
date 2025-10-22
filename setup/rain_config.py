@@ -263,6 +263,127 @@ class RainScenario:
         
         return cls(events)
     
+    @classmethod
+    def from_datetime_csv(cls, csv_path: str,
+                          time_converter,
+                          datetime_column: str = 'Date',
+                          rain_column: str = 'Pluie',
+                          rain_unit: str = 'mm/day',
+                          zones: List[RainZone] = None,
+                          delimiter: Optional[str] = None):
+        """
+        Load rain events from CSV with datetime column
+        
+        Designed for files like BB_METEO.csv:
+            Date/Heure;Pluie tot. (mm);Neige tot. (cm)
+            2024-01-01;0;0
+            2024-01-02;1.5;0
+            2024-01-03;0;0
+        
+        Args:
+            csv_path: Path to CSV file
+            time_converter: TimeConverter instance (defines simulation start)
+            datetime_column: Name of datetime column
+            rain_column: Name of rain column
+            rain_unit: "mm/day" or "mm/hour"
+            zones: Optional spatial zones
+            delimiter: CSV delimiter (auto-detect if None)
+        
+        Returns:
+            RainScenario with events starting at t=0
+        
+        Example:
+            from tools import TimeConverter
+            from setup import RainScenario
+            
+            converter = TimeConverter(start_datetime=datetime(2024, 1, 1))
+            rain = RainScenario.from_datetime_csv(
+                'BB_METEO.csv',
+                time_converter=converter,
+                datetime_column='Date/Heure',
+                rain_column='Pluie tot. (mm)',
+                rain_unit='mm/day'
+            )
+        """
+        # Load data using TimeConverter
+        data = time_converter.load_datetime_csv(
+            csv_path,
+            datetime_column=datetime_column,
+            value_columns=[rain_column],
+            delimiter=delimiter
+        )
+        
+        times_seconds = data['times']
+        # Find the actual rain column name (partial match)
+        rain_col_key = [k for k in data.keys() if rain_column.lower() in k.lower()][0]
+        rain_values = data[rain_col_key]
+        
+        # Convert to hours
+        times_hours = times_seconds / 3600.0
+        
+        # Convert rain to mm/hour
+        rain_unit_lower = rain_unit.lower().replace('/', '')
+        if 'day' in rain_unit_lower:
+            intensities = rain_values / 24.0  # mm/day → mm/hour
+        elif 'hour' in rain_unit_lower:
+            intensities = rain_values  # Already mm/hour
+        else:
+            raise ValueError(f"Invalid rain_unit: {rain_unit}. Use 'mm/day' or 'mm/hour'")
+        
+        # Build rain events (constant intensity periods)
+        events = []
+        in_event = False
+        event_start = None
+        current_intensity = 0.0
+        
+        for i in range(len(times_hours)):
+            t = times_hours[i]
+            intensity = intensities[i]
+            
+            if intensity > 0 and not in_event:
+                # Start new event
+                in_event = True
+                event_start = t
+                current_intensity = intensity
+            
+            elif intensity <= 0 and in_event:
+                # End event
+                events.append(RainEvent(
+                    start_time=event_start,
+                    end_time=t,
+                    intensity=current_intensity,
+                    zones=zones,
+                    name=f"event_{len(events)+1}"
+                ))
+                in_event = False
+            
+            elif in_event and abs(intensity - current_intensity) > 1e-6:
+                # Intensity changed
+                events.append(RainEvent(
+                    start_time=event_start,
+                    end_time=t,
+                    intensity=current_intensity,
+                    zones=zones,
+                    name=f"event_{len(events)+1}"
+                ))
+                event_start = t
+                current_intensity = intensity
+        
+        # Close final event
+        if in_event:
+            events.append(RainEvent(
+                start_time=event_start,
+                end_time=times_hours[-1],
+                intensity=current_intensity,
+                zones=zones,
+                name=f"event_{len(events)+1}"
+            ))
+        
+        print(f"  Created {len(events)} rain event(s)")
+        
+        return cls(events)
+
+    
     def get_flux_at_x(self, x: float, t_hours: float) -> float:
         """
         Get total rain flux at position x and time t

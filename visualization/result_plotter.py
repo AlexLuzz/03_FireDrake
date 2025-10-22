@@ -2,6 +2,7 @@
 Results visualization
 """
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from matplotlib.gridspec import GridSpec
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator, interp1d
@@ -18,8 +19,8 @@ class ResultsPlotter:
         self.coords = mesh.coordinates.dat.data
 
     def plot_complete_results(self, probe_data, snapshots=None, rain_scenario=None, 
-                             filename=None, comsol_data_file=None, plot_residuals=False,
-                             start_from=0.0):
+                             filename=None, comsol_data_file=None, measured_data_file=None,
+                             plot_residuals=False, start_from=0.0, plot_dates=True):
         """
         Create complete results figure
         
@@ -28,43 +29,86 @@ class ResultsPlotter:
             snapshots: Dictionary from SnapshotManager.snapshots
             rain_scenario: Optional RainScenario for plotting rain events
             filename: Output filename (optional)
-            comsol_data_file: Path to CSV with COMSOL data
+            comsol_data_file: Path to CSV with COMSOL modeled data
+            measured_data_file: Path to CSV with real measured data
             plot_residuals: Whether to plot residuals
             start_from: Time in days to start COMSOL data from (shifts time axis so this becomes t=0)
+            plot_dates: If True and config has time_converter, plot with datetime x-axis (default: True)
         """
-        # Load and align COMSOL data if provided
+        # Determine if we can use datetime axis
+        use_datetime = plot_dates and hasattr(self.config, 'time_converter') and self.config.time_converter is not None
+        
+        # Load and align data if provided
         comsol_data = None
+        measured_data = None
+        
         if comsol_data_file:
-            comsol_data = self._load_and_align_comsol_data(
+            comsol_data = self._load_and_align_data(
                 comsol_data_file, 
                 start_from, 
-                probe_data['times'][-1] / 3600.0 / 24.0  # sim end in days
+                probe_data['times'][-1] / 3600.0 / 24.0,
+                data_type='COMSOL'
+            )
+        
+        if measured_data_file:
+            measured_data = self._load_and_align_data(
+                measured_data_file,
+                start_from,
+                probe_data['times'][-1] / 3600.0 / 24.0,
+                data_type='Measured'
             )
         
         # Calculate layout
         n_rows = 1  # Time series
-        if plot_residuals and comsol_data:
-            n_rows += 1  # Residuals
+        if plot_residuals:
+            if comsol_data:
+                n_rows += 1  # COMSOL residuals
+            if measured_data:
+                n_rows += 1  # Measured residuals
         if snapshots:
             n_rows += 2  # Snapshots (2 rows)
         
         fig_height = 4 * n_rows
         fig = plt.figure(figsize=(20, fig_height))
-        gs = GridSpec(n_rows, 3, figure=fig, hspace=0.35, wspace=0.35)
+        gs = GridSpec(n_rows, 3, figure=fig, hspace=0.25, wspace=0.35)
+        
+        # Overall title
+        title = 'Richards Equation Simulation - Water Table Response'
+        if use_datetime and self.config.start_datetime:
+            title += f'\n{self.config.start_datetime.strftime("%Y-%m-%d")} to {self.config.time_converter.to_datetime(self.config.t_end).strftime("%Y-%m-%d")}'
+        fig.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
+        
+        # Track current row and which is the last time-series row (for x-axis labels)
+        current_row = 0
+        last_timeseries_row = 0 if not plot_residuals else (1 if comsol_data and not measured_data else 2)
         
         # Plot time series (row 0)
-        current_row = 0
-        self._plot_time_series(fig, gs[current_row, :], probe_data, rain_scenario, comsol_data)
+        is_last = (current_row == last_timeseries_row)
+        self._plot_time_series(fig, gs[current_row, :], probe_data, rain_scenario, 
+                              comsol_data, measured_data, show_xlabel=is_last,
+                              use_datetime=use_datetime)
         current_row += 1
         
-        # Plot residuals if requested (row 1)
-        if plot_residuals and comsol_data:
-            self._plot_residuals(fig, gs[current_row, :], probe_data, comsol_data)
-            current_row += 1
+        # Plot residuals if requested
+        if plot_residuals:
+            if comsol_data:
+                is_last = (current_row == last_timeseries_row)
+                self._plot_residuals(fig, gs[current_row, :], probe_data, comsol_data, 
+                                    'COMSOL', show_xlabel=is_last,
+                                    use_datetime=use_datetime)
+                current_row += 1
+            
+            if measured_data:
+                is_last = (current_row == last_timeseries_row)
+                self._plot_residuals(fig, gs[current_row, :], probe_data, measured_data,
+                                    'Measured', show_xlabel=is_last,
+                                    use_datetime=use_datetime)
+                current_row += 1
         
-        # Plot snapshots (rows 2-3)
+        # Plot snapshots (rows after time series)
         if snapshots:
-            self._plot_snapshots(fig, gs, snapshots, start_row=current_row)
+            self._plot_snapshots(fig, gs, snapshots, start_row=current_row,
+                               use_datetime=use_datetime)
         
         # Save
         if filename is None:
@@ -74,14 +118,15 @@ class ResultsPlotter:
         print(f"\n✓ Plot saved: {filename}")
         plt.close()
     
-    def _load_and_align_comsol_data(self, csv_path, start_from, sim_duration_days):
+    def _load_and_align_data(self, csv_path, start_from, sim_duration_days, data_type='Data'):
         """
-        Load COMSOL data and align it with simulation time
+        Load data (COMSOL or measured) and align it with simulation time
         
         Args:
-            csv_path: Path to COMSOL CSV file
-            start_from: COMSOL time (days) to map to simulation t=0
+            csv_path: Path to CSV file
+            start_from: Time (days) to map to simulation t=0
             sim_duration_days: Simulation duration in days
+            data_type: 'COMSOL' or 'Measured' for logging
         
         Returns:
             Dictionary with aligned time and data arrays, or None if error
@@ -109,25 +154,22 @@ class ResultsPlotter:
                 if col.startswith('LTC'):
                     data_raw[col] = np.array([float(row[col]) for row in rows])
             
-            print(f"✓ Loaded COMSOL data: {list(data_raw.keys())}")
-            print(f"  Raw COMSOL time range: {times_raw[0]:.2f} to {times_raw[-1]:.2f} days ({len(times_raw)} points)")
+            print(f"✓ Loaded {data_type} data: {list(data_raw.keys())}")
+            print(f"  Raw time range: {times_raw[0]:.2f} to {times_raw[-1]:.2f} days ({len(times_raw)} points)")
             
-            # Step 1: Filter to start from specified time
+            # Filter, shift, and clip
             mask_start = times_raw >= start_from
             if not np.any(mask_start):
-                print(f"⚠️  No COMSOL data found at or after start_from={start_from:.2f} days")
+                print(f"⚠️  No {data_type} data found at or after start_from={start_from:.2f} days")
                 return None
             
             times_filtered = times_raw[mask_start]
             data_filtered = {k: v[mask_start] for k, v in data_raw.items()}
-            
-            # Step 2: Shift time axis so start_from becomes t=0
             times_shifted = times_filtered - start_from
             
-            # Step 3: Clip to simulation duration
             mask_clip = times_shifted <= sim_duration_days
             if not np.any(mask_clip):
-                print(f"⚠️  No COMSOL data in simulation range after shifting")
+                print(f"⚠️  No {data_type} data in simulation range after shifting")
                 return None
             
             times_aligned = times_shifted[mask_clip]
@@ -137,51 +179,93 @@ class ResultsPlotter:
             aligned_data = {'times': times_aligned}
             aligned_data.update(data_aligned)
             
-            print(f"  Aligned COMSOL data:")
-            print(f"    - Started from COMSOL day {start_from:.2f} (shifted to simulation t=0)")
-            print(f"    - Clipped to simulation duration: 0 to {sim_duration_days:.2f} days")
-            print(f"    - Final data points: {len(times_aligned)}")
+            print(f"  Aligned {data_type} data: {len(times_aligned)} points in range [0, {sim_duration_days:.2f}] days")
             
             return aligned_data
             
         except Exception as e:
-            print(f"⚠️  Error loading COMSOL data: {e}")
+            print(f"⚠️  Error loading {data_type} data: {e}")
             return None
     
-    def _plot_time_series(self, fig, gs_slice, probe_data, rain_scenario, comsol_data):
+    def _plot_time_series(self, fig, gs_slice, probe_data, rain_scenario, 
+                         comsol_data, measured_data, show_xlabel=True, use_datetime=False):
         """Plot water table time series"""
         ax = fig.add_subplot(gs_slice)
         
-        times_h = probe_data['times'] / 3600.0
+        # Prepare time data
+        times_sec = probe_data['times']
+        if use_datetime:
+            times_plot = [self.config.time_converter.to_datetime(t) for t in times_sec]
+        else:
+            times_plot = times_sec / 3600.0  # Convert to hours
+        
         colors = ['#1f77b4', '#2ca02c', '#d62728']
         
-        # Plot simulated data
+        # Plot simulated data (Firedrake)
         for i, (name, data) in enumerate(probe_data['data'].items()):
-            ax.plot(times_h, data, color=colors[i], linewidth=2.5, 
-                   label=f'{name} (Simulated)', marker='o', markersize=3, 
-                   markevery=max(1, len(times_h)//30))
+            ax.plot(times_plot, data, color=colors[i], linewidth=2.5, 
+                   label=f'{name} (Firedrake)', marker='o', markersize=3, 
+                   markevery=max(1, len(times_plot)//30))
         
         # Plot COMSOL data if available
         if comsol_data:
-            times_h_comsol = comsol_data['times'] * 24  # days to hours
+            if use_datetime:
+                # COMSOL data times are in days from simulation start
+                times_comsol = [self.config.time_converter.to_datetime(t * 86400) for t in comsol_data['times']]
+            else:
+                times_comsol = comsol_data['times'] * 24  # days to hours
             
             for i, ltc_name in enumerate(['LTC 101', 'LTC 102', 'LTC 103']):
                 if ltc_name in comsol_data:
-                    ax.plot(times_h_comsol, comsol_data[ltc_name],
+                    ax.plot(times_comsol, comsol_data[ltc_name],
                            color=colors[i], linewidth=2, linestyle='--',
                            label=f'{ltc_name} (COMSOL)', marker='s', markersize=4,
-                           markevery=max(1, len(times_h_comsol)//20), alpha=0.8)
+                           markevery=max(1, len(times_comsol)//20), alpha=0.8)
+        
+        # Plot measured data if available
+        if measured_data:
+            if use_datetime:
+                times_measured = [self.config.time_converter.to_datetime(t * 86400) for t in measured_data['times']]
+            else:
+                times_measured = measured_data['times'] * 24
+            
+            for i, ltc_name in enumerate(['LTC 101', 'LTC 102', 'LTC 103']):
+                if ltc_name in measured_data:
+                    ax.plot(times_measured, measured_data[ltc_name],
+                           color=colors[i], linewidth=2, linestyle=':',
+                           label=f'{ltc_name} (Measured)', marker='^', markersize=5,
+                           markevery=max(1, len(times_measured)//20), alpha=0.8)
         
         # Rain event shading
         if rain_scenario:
             for event in rain_scenario.events:
-                ax.axvspan(event.start_time, event.end_time, 
-                          alpha=0.15, color='lightblue', label='Rain')
+                if use_datetime:
+                    start_dt = self.config.time_converter.to_datetime(event.start_time * 3600)
+                    end_dt = self.config.time_converter.to_datetime(event.end_time * 3600)
+                    ax.axvspan(start_dt, end_dt, alpha=0.15, color='lightblue', label='Rain')
+                else:
+                    ax.axvspan(event.start_time, event.end_time, 
+                              alpha=0.15, color='lightblue', label='Rain')
         
         ax.set_ylabel('Water Table Elevation (m)', fontsize=12, fontweight='bold')
-        ax.set_xlabel('Time (hours)', fontsize=12, fontweight='bold')
+        if show_xlabel:
+            if use_datetime:
+                ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+                # Format date axis
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+            else:
+                ax.set_xlabel('Time (hours)', fontsize=12, fontweight='bold')
+        else:
+            ax.tick_params(labelbottom=False)
+        
         ax.grid(True, alpha=0.3)
-        ax.set_xlim([0, times_h[-1]])
+        
+        if use_datetime:
+            ax.set_xlim([times_plot[0], times_plot[-1]])
+        else:
+            ax.set_xlim([0, times_plot[-1]])
         
         # Remove duplicate labels in legend
         handles, labels = ax.get_legend_handles_labels()
@@ -189,12 +273,23 @@ class ResultsPlotter:
         ax.legend(by_label.values(), by_label.keys(), 
                  loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=10)
     
-    def _plot_residuals(self, fig, gs_slice, probe_data, comsol_data):
-        """Plot residuals: COMSOL - Firedrake"""
+    def _plot_residuals(self, fig, gs_slice, probe_data, reference_data, 
+                       reference_name, show_xlabel=True, use_datetime=False):
+        """Plot residuals: Reference - Firedrake"""
         ax = fig.add_subplot(gs_slice)
         
-        times_h_sim = probe_data['times'] / 3600.0
-        times_h_comsol = comsol_data['times'] * 24  # days to hours
+        # Prepare simulation time data
+        times_sec_sim = probe_data['times']
+        if use_datetime:
+            times_sim = [self.config.time_converter.to_datetime(t) for t in times_sec_sim]
+        else:
+            times_sim = times_sec_sim / 3600.0
+        
+        # Prepare reference time data
+        if use_datetime:
+            times_ref = [self.config.time_converter.to_datetime(t * 86400) for t in reference_data['times']]
+        else:
+            times_ref = reference_data['times'] * 24
         
         colors = ['#1f77b4', '#2ca02c', '#d62728']
         probe_names = list(probe_data['data'].keys())
@@ -204,41 +299,56 @@ class ResultsPlotter:
             ltc_name = ltc_names[i]
             probe_name = probe_names[i]
             
-            if ltc_name not in comsol_data:
+            if ltc_name not in reference_data:
                 continue
             
             # Get data
             sim_data = np.array(probe_data['data'][probe_name])
-            comsol_values = comsol_data[ltc_name]
+            ref_values = reference_data[ltc_name]
             
-            # Interpolate simulation to COMSOL times
-            interp_func = interp1d(times_h_sim, sim_data, kind='linear', 
+            # Interpolate simulation to reference times (need numeric values)
+            times_sec_sim_numeric = times_sec_sim
+            times_ref_numeric = reference_data['times'] * 86400  # days to seconds
+            
+            interp_func = interp1d(times_sec_sim_numeric, sim_data, kind='linear', 
                                   bounds_error=False, fill_value='extrapolate')
-            sim_interp = interp_func(times_h_comsol)
+            sim_interp = interp_func(times_ref_numeric)
             
-            # Calculate residuals
-            residuals = comsol_values - sim_interp
+            # Calculate residuals (Reference - Firedrake)
+            residuals = ref_values - sim_interp
             
-            # Plot
-            ax.plot(times_h_comsol, residuals, color=colors[i], linewidth=2.5,
-                   label=f'{ltc_name} - {probe_name}', marker='o', markersize=3,
-                   markevery=max(1, len(times_h_comsol)//30))
+            # Plot using prepared time arrays
+            ax.plot(times_ref, residuals, color=colors[i], linewidth=2.5,
+                   marker='o', markersize=3, markevery=max(1, len(times_ref)//30))
             
             # Statistics
-            print(f"  {ltc_name} residuals: mean={residuals.mean():.4f}m, "
+            print(f"  {reference_name} - {ltc_name} residuals: mean={residuals.mean():.4f}m, "
                   f"std={residuals.std():.4f}m, max_abs={np.abs(residuals).max():.4f}m")
         
         # Zero line
-        ax.axhline(0, color='black', linestyle='-', linewidth=1.5, alpha=0.5, label='Perfect match')
+        ax.axhline(0, color='black', linestyle='-', linewidth=1.5, alpha=0.5)
         
-        ax.set_ylabel('Residual (m)\n[COMSOL - Firedrake]', fontsize=12, fontweight='bold')
-        ax.set_xlabel('Time (hours)', fontsize=12, fontweight='bold')
-        ax.set_title('Residuals: COMSOL vs Firedrake', fontsize=13, fontweight='bold')
+        ax.set_ylabel(f'Residual (m)\n[{reference_name} - Firedrake]', 
+                     fontsize=11, fontweight='bold')
+        if show_xlabel:
+            if use_datetime:
+                ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+            else:
+                ax.set_xlabel('Time (hours)', fontsize=12, fontweight='bold')
+        else:
+            ax.tick_params(labelbottom=False)
+        
         ax.grid(True, alpha=0.3)
-        ax.set_xlim([0, times_h_sim[-1]])
-        ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=10)
+        
+        if use_datetime:
+            ax.set_xlim([times_sim[0], times_sim[-1]])
+        else:
+            ax.set_xlim([0, times_sim[-1]])
     
-    def _plot_snapshots(self, fig, gs, snapshots, start_row):
+    def _plot_snapshots(self, fig, gs, snapshots, start_row, use_datetime=False):
         """Plot spatial snapshots (6 plots in 2x3 grid)"""
         sorted_times = sorted(snapshots.keys())[:6]
         while len(sorted_times) < 6:
@@ -272,15 +382,23 @@ class ResultsPlotter:
                 contour_for_cbar = cf
             
             # Monitoring points
-            if hasattr(self.config, 'monitor_x_positions'):
+            if hasattr(self.config, 'probes_positions'):
                 colors = ['#1f77b4', '#2ca02c', '#d62728']
-                for i, x in enumerate(self.config.monitor_x_positions):
-                    ax.plot(x, self.config.Ly, '*', color=colors[i], 
+                for i, (x, y) in enumerate(self.config.probes_positions):
+                    ax.plot(x, y, '*', color=colors[i], 
                            markersize=12, markeredgecolor='black', markeredgewidth=0.8)
             
             ax.set_xlabel('x (m)', fontsize=10)
             ax.set_ylabel('y (m)', fontsize=10)
-            ax.set_title(f't = {t/3600:.1f}h', fontsize=11, fontweight='bold')
+            
+            # Title with time or datetime
+            if use_datetime:
+                dt_title = self.config.time_converter.to_datetime(t)
+                ax.set_title(f'{dt_title.strftime("%Y-%m-%d %H:%M")}', 
+                           fontsize=11, fontweight='bold')
+            else:
+                ax.set_title(f't = {t/3600:.1f}h', fontsize=11, fontweight='bold')
+            
             ax.set_aspect('equal')
             ax.set_xlim(0, self.config.Lx)
             ax.set_ylim(0, self.config.Ly)

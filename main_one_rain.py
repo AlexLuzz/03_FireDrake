@@ -4,6 +4,7 @@ from config import SimulationConfig
 from physics import *
 from solver import *
 from visualization import *
+from setup import *
 
 def main():
     """Main simulation function"""
@@ -14,8 +15,7 @@ def main():
     config = SimulationConfig(
         # You can modify config parameters here if needed
         dt=3600,
-        t_end=15*24*3600,
-        monitor_x_positions=[8.0, 10.0, 12.5],
+        t_end=5*24*3600,
     )
     # ==========================================
     # 2. DEFINE RAIN SCENARIO
@@ -55,14 +55,18 @@ def main():
     # ==========================================
     # 4. CREATE BOUNDARY CONDITION MANAGER
     # ==========================================
-    bc_manager = BoundaryConditionManager(V, config)
+    bc_manager = BoundaryConditionManager(
+        V,
+        initial_water_table=1.2,
+        #water_table_trend={'t_end': 315*86400, 'H0_end': 1.0}
+    )
     
     # ==========================================
     # 5. CREATE MONITORING
     # ==========================================
-    probe_names = [f"LTC {i+1} (x={x:.1f}m)" for i, x in enumerate(config.monitor_x_positions)]
-    probe_manager = ProbeManager(mesh, config.monitor_x_positions, probe_names)
-    
+    probe_names = [f"LTC {i+1} (x={x:.1f}m, y={y:.1f}m)" for i, (x, y) in enumerate(config.probes_positions)]
+    probe_manager = ProbeManager(mesh, config.probes_positions, probe_names)
+
     # Define 6 snapshot times (in seconds)
     snapshot_times = [
         0.0,

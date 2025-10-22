@@ -7,10 +7,10 @@ import numpy as np
 class ProbeManager:
     """Manages water table elevation monitoring at specific x-locations"""
     
-    def __init__(self, mesh, x_positions, names=None):
+    def __init__(self, mesh, probes_positions, names=None):
         self.mesh = mesh
-        self.x_positions = x_positions
-        self.names = names or [f"Probe_{i+1}" for i in range(len(x_positions))]
+        self.probes_positions = probes_positions
+        self.names = names or [f"Probe_{i+1}" for i in range(len(probes_positions))]
         self.data = {name: [] for name in self.names}
         self.times = []
         
@@ -20,20 +20,22 @@ class ProbeManager:
         self.x_tol = domain_width * 0.01  # 1% of domain width
         
         print(f"ProbeManager initialized with x_tol = {self.x_tol:.4f}m")
-    
-    def find_water_table_at_x(self, pressure_field, x_position):
-        """Find water table elevation (where p=0) at given x position"""
+
+    def find_water_table_at_probe_pos(self, pressure_field, probe_pos):
+        """Find water table elevation (where p=0) at given probe position"""
         coords = self.mesh.coordinates.dat.data
         p_vals = pressure_field.dat.data[:]
+
+        x_pos, y_pos = probe_pos
         
         # Find all nodes near this x position
-        mask = np.abs(coords[:, 0] - x_position) < self.x_tol
+        mask = np.abs(coords[:, 0] - x_pos) < self.x_tol
         if not np.any(mask):
-            print(f"⚠️  No nodes found near x={x_position:.2f}m (tol={self.x_tol:.4f}m)")
+            print(f"⚠️  No nodes found near x={x_pos:.2f}m (tol={self.x_tol:.4f}m)")
             return None
         
         # Get y-coordinates and pressures at this x
-        y_coords = coords[mask, 1]
+        y_coords = coords[mask, 1]  # Column 1 = y coordinates
         p_at_x = p_vals[mask]
         
         # Sort by y (bottom to top)
@@ -69,8 +71,8 @@ class ProbeManager:
     def record(self, t, pressure_field):
         """Record water table elevation at all probe locations"""
         self.times.append(t)
-        for x_pos, name in zip(self.x_positions, self.names):
-            wt = self.find_water_table_at_x(pressure_field, x_pos)
+        for probe_pos, name in zip(self.probes_positions, self.names):
+            wt = self.find_water_table_at_probe_pos(pressure_field, probe_pos)
             self.data[name].append(wt if wt is not None else np.nan)
     
     def record_initial(self, pressure_field):
