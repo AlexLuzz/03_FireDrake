@@ -11,7 +11,7 @@ import numpy as np
 from typing import Callable, Dict, Tuple, List
 import matplotlib.pyplot as plt
 from functools import partial
-
+from firedrake.ml.jax.fem_operator import FiredrakeJaxOperator, to_jax, from_jax
 
 # ============================================================
 # JAX-BASED SENSITIVITY ANALYSIS
@@ -101,20 +101,19 @@ class JaxSensitivityAnalyzer:
         """
         h_jax = jnp.array(h_profile)
         
-        # Create sensitivity function
+        # Create function that returns theta at each point
         if param_name == 'alpha':
-            def theta_func(alpha):
+            def theta_at_param(alpha):
                 return self.van_genuchten_saturation(
                     h_jax, alpha, 
                     base_params['n'],
                     base_params.get('theta_s', 0.45),
                     base_params.get('theta_r', 0.067)
                 )
-            grad_func = grad(lambda p: jnp.sum(theta_func(p)))
             param_value = base_params['alpha']
             
         elif param_name == 'n':
-            def theta_func(n):
+            def theta_at_param(n):
                 return self.van_genuchten_saturation(
                     h_jax,
                     base_params['alpha'],
@@ -122,22 +121,22 @@ class JaxSensitivityAnalyzer:
                     base_params.get('theta_s', 0.45),
                     base_params.get('theta_r', 0.067)
                 )
-            grad_func = grad(lambda p: jnp.sum(theta_func(p)))
             param_value = base_params['n']
             
         elif param_name == 'K_s':
-            def K_func(K_s):
+            def theta_at_param(K_s):
                 return self.van_genuchten_conductivity(
                     h_jax,
                     base_params['alpha'],
                     base_params['n'],
                     K_s
                 )
-            grad_func = grad(lambda p: jnp.sum(K_func(p)))
             param_value = base_params['K_s']
         
-        # Compute gradient using JAX AD
-        sensitivity = grad_func(param_value)
+        # Use jacfwd to get Jacobian (gradient at each point)
+        # This gives us ∂θ_i/∂p for all i
+        jac_func = jacfwd(theta_at_param)
+        sensitivity = jac_func(param_value)
         
         return np.array(sensitivity)
     
@@ -529,58 +528,203 @@ class SobolSensitivity:
 # EXAMPLE USAGE
 # ============================================================
 
-def example_jax_sensitivity():
-    """Example: JAX-based local sensitivity"""
-    
-    print("JAX Sensitivity Analysis Example\n")
+def validate_jax_gradients():
+    """Validate JAX gradients against finite differences"""
+    print("\n" + "="*60)
+    print("Validating JAX Automatic Differentiation")
+    print("="*60)
     
     analyzer = JaxSensitivityAnalyzer()
     
-    # Pressure head profile
-    h = np.linspace(-5, 0, 100)
-    
-    # Base parameters
+    # Test point
+    h_test = np.array([-2.0])
     base_params = {
         'alpha': 2.0,
         'n': 1.5,
-        'K_s': 1e-5,
         'theta_s': 0.45,
         'theta_r': 0.067
     }
     
-    # Compute saturation
-    theta = analyzer.van_genuchten_saturation(
+    # JAX gradient
+    sens_jax = analyzer.compute_parameter_sensitivities(h_test, base_params, 'alpha')
+    
+    # Finite difference gradient
+    epsilon = 1e-6
+    params_plus = base_params.copy()
+    params_plus['alpha'] = base_params['alpha'] + epsilon
+    
+    params_minus = base_params.copy()
+    params_minus['alpha'] = base_params['alpha'] - epsilon
+    
+    theta_plus = analyzer.van_genuchten_saturation(
+        jnp.array(h_test), params_plus['alpha'], params_plus['n'],
+        params_plus['theta_s'], params_plus['theta_r']
+    )
+    
+    theta_minus = analyzer.van_genuchten_saturation(
+        jnp.array(h_test), params_minus['alpha'], params_minus['n'],
+        params_minus['theta_s'], params_minus['theta_r']
+    )
+    
+    sens_fd = (theta_plus - theta_minus) / (2 * epsilon)
+    
+    # Compare
+    print(f"\nTest point: h = {h_test[0]} m")
+    print(f"Parameters: α={base_params['alpha']}, n={base_params['n']}")
+    print(f"\nGradient ∂θ/∂α:")
+    print(f"  JAX (autodiff):      {sens_jax[0]:.8e}")
+    print(f"  Finite difference:   {sens_fd[0]:.8e}")
+    print(f"  Relative difference: {abs(sens_jax[0] - sens_fd[0]) / abs(sens_fd[0]) * 100:.6f}%")
+    
+    if abs(sens_jax[0] - sens_fd[0]) / abs(sens_fd[0]) < 1e-4:
+        print("\n✓ Validation PASSED: JAX gradients are accurate!")
+    else:
+        print("\n✗ Validation FAILED: Large discrepancy detected!")
+    
+    print("="*60)
+
+
+def example_jax_sensitivity():
+    """Example: JAX-based local sensitivity"""
+    
+    print("="*60)
+    print("JAX Sensitivity Analysis Example")
+    print("="*60)
+    
+    # First, validate gradients
+    validate_jax_gradients()
+    
+    analyzer = JaxSensitivityAnalyzer()
+    
+    # Pressure head profile (from saturated to dry)
+    h = np.linspace(-5, 0, 100)
+    
+    # Base parameters (typical sandy loam)
+    base_params = {
+        'alpha': 2.0,      # 1/m
+        'n': 1.5,          # -
+        'K_s': 1e-5,       # m/s
+        'theta_s': 0.45,   # -
+        'theta_r': 0.067   # -
+    }
+    
+    print("\nBase parameters:")
+    for key, val in base_params.items():
+        print(f"  {key}: {val}")
+    
+    # Compute saturation and conductivity
+    print("\nComputing retention curve...")
+    theta = np.array(analyzer.van_genuchten_saturation(
         jnp.array(h),
         base_params['alpha'],
         base_params['n'],
         base_params['theta_s'],
         base_params['theta_r']
-    )
+    ))
+    
+    print("Computing hydraulic conductivity...")
+    K = np.array(analyzer.van_genuchten_conductivity(
+        jnp.array(h),
+        base_params['alpha'],
+        base_params['n'],
+        base_params['K_s']
+    ))
     
     # Compute sensitivities
-    sens_alpha = analyzer.compute_parameter_sensitivities(h, base_params, 'alpha')
-    sens_n = analyzer.compute_parameter_sensitivities(h, base_params, 'n')
+    print("\nComputing sensitivities...")
+    print("  ∂θ/∂α...")
+    sens_theta_alpha = analyzer.compute_parameter_sensitivities(h, base_params, 'alpha')
+    print("  ∂θ/∂n...")
+    sens_theta_n = analyzer.compute_parameter_sensitivities(h, base_params, 'n')
     
-    # Plot
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+    # Compute Jacobian (all sensitivities)
+    print("\nComputing full Jacobian...")
+    jacobian = analyzer.compute_jacobian(h, base_params)
     
+    # Create comprehensive plot
+    fig = plt.figure(figsize=(14, 10))
+    gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+    
+    # 1. Retention curve
+    ax1 = fig.add_subplot(gs[0, 0])
     ax1.plot(h, theta, 'b-', linewidth=2)
     ax1.set_xlabel('Pressure head h [m]')
-    ax1.set_ylabel('Saturation θ [-]')
+    ax1.set_ylabel('Water content θ [-]')
     ax1.set_title('Water Retention Curve')
     ax1.grid(alpha=0.3)
+    ax1.axhline(base_params['theta_s'], color='gray', linestyle='--', alpha=0.5, label='θs')
+    ax1.axhline(base_params['theta_r'], color='gray', linestyle='--', alpha=0.5, label='θr')
+    ax1.legend()
     
-    ax2.plot(h, sens_alpha, label='∂θ/∂α', linewidth=2)
-    ax2.plot(h, sens_n, label='∂θ/∂n', linewidth=2)
+    # 2. Hydraulic conductivity
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax2.semilogy(h, K, 'r-', linewidth=2)
     ax2.set_xlabel('Pressure head h [m]')
-    ax2.set_ylabel('Sensitivity')
-    ax2.set_title('Parameter Sensitivities')
-    ax2.legend()
+    ax2.set_ylabel('Hydraulic conductivity K [m/s]')
+    ax2.set_title('Hydraulic Conductivity')
     ax2.grid(alpha=0.3)
+    ax2.axhline(base_params['K_s'], color='gray', linestyle='--', alpha=0.5, label='Ks')
+    ax2.legend()
     
-    plt.tight_layout()
-    plt.savefig('jax_sensitivity_example.png', dpi=150)
-    print("Saved sensitivity plot")
+    # 3. Sensitivity ∂θ/∂α
+    ax3 = fig.add_subplot(gs[1, 0])
+    ax3.plot(h, sens_theta_alpha, 'g-', linewidth=2)
+    ax3.set_xlabel('Pressure head h [m]')
+    ax3.set_ylabel('∂θ/∂α [m]')
+    ax3.set_title('Sensitivity to α parameter')
+    ax3.grid(alpha=0.3)
+    ax3.axhline(0, color='k', linestyle='-', linewidth=0.5)
+    
+    # 4. Sensitivity ∂θ/∂n
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax4.plot(h, sens_theta_n, 'orange', linewidth=2)
+    ax4.set_xlabel('Pressure head h [m]')
+    ax4.set_ylabel('∂θ/∂n [-]')
+    ax4.set_title('Sensitivity to n parameter')
+    ax4.grid(alpha=0.3)
+    ax4.axhline(0, color='k', linestyle='-', linewidth=0.5)
+    
+    # 5. Combined sensitivities (normalized)
+    ax5 = fig.add_subplot(gs[2, :])
+    # Normalize sensitivities for comparison
+    sens_alpha_norm = sens_theta_alpha / np.max(np.abs(sens_theta_alpha))
+    sens_n_norm = sens_theta_n / np.max(np.abs(sens_theta_n))
+    
+    ax5.plot(h, sens_alpha_norm, 'g-', linewidth=2, label='∂θ/∂α (normalized)')
+    ax5.plot(h, sens_n_norm, 'orange', linewidth=2, label='∂θ/∂n (normalized)')
+    ax5.set_xlabel('Pressure head h [m]')
+    ax5.set_ylabel('Normalized sensitivity [-]')
+    ax5.set_title('Relative Parameter Sensitivities')
+    ax5.legend()
+    ax5.grid(alpha=0.3)
+    ax5.axhline(0, color='k', linestyle='-', linewidth=0.5)
+    
+    # Add text with max sensitivity values
+    max_sens_alpha = np.max(np.abs(sens_theta_alpha))
+    max_sens_n = np.max(np.abs(sens_theta_n))
+    h_max_alpha = h[np.argmax(np.abs(sens_theta_alpha))]
+    h_max_n = h[np.argmax(np.abs(sens_theta_n))]
+    
+    textstr = f'Max |∂θ/∂α| = {max_sens_alpha:.3e} at h = {h_max_alpha:.2f} m\n'
+    textstr += f'Max |∂θ/∂n| = {max_sens_n:.3e} at h = {h_max_n:.2f} m'
+    ax5.text(0.02, 0.98, textstr, transform=ax5.transAxes,
+            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.suptitle('Van Genuchten Model - Sensitivity Analysis', fontsize=14, fontweight='bold')
+    
+    plt.savefig('jax_sensitivity_example.png', dpi=150, bbox_inches='tight')
+    print("\n" + "="*60)
+    print("Saved sensitivity plot to 'jax_sensitivity_example.png'")
+    print("="*60)
+    
+    # Print summary statistics
+    print("\nSensitivity Summary:")
+    print("-"*60)
+    print(f"{'Parameter':<15} {'Max |∂θ/∂p|':<15} {'h at max':<15}")
+    print("-"*60)
+    print(f"{'alpha':<15} {max_sens_alpha:<15.3e} {h_max_alpha:<15.2f}")
+    print(f"{'n':<15} {max_sens_n:<15.3e} {h_max_n:<15.2f}")
+    print("-"*60)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,9 @@
 from datetime import datetime
-from firedrake import *
-from config import SimulationConfig
+from firedrake import RectangleMesh, FunctionSpace
+from setup import *
 from physics import *
 from solver import *
 from visualization import *
-from setup import *
 
 def main():
     """Main simulation function"""

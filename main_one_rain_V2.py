@@ -1,9 +1,9 @@
 from datetime import datetime
-from firedrake import RectangleMesh, FunctionSpace
-from setup import SimulationConfig
+from firedrake import *
 from physics import *
 from solver import *
 from visualization import *
+from datetime import datetime, timedelta
 from setup import *
 
 def main():
@@ -13,9 +13,10 @@ def main():
     # 1. CONFIGURATION
     # ==========================================
     config = SimulationConfig(
-        # You can modify config parameters here if needed
-        dt=3600,
-        t_end=5*24*3600,
+        name="Datetime_Duration",
+        start_datetime=datetime(2024, 4, 1), # YYYY, MM, DD
+        end_datetime=datetime(2024, 8, 1),
+        dt_td=timedelta(hours=2),
     )
     # ==========================================
     # 2. DEFINE RAIN SCENARIO
@@ -25,11 +26,12 @@ def main():
         RainZone(x_min=9.0, x_max=11.0, multiplier=6.0, name="green_infrastructure"),
     ]
 
-    rain_event = RainScenario.single_event(
-        start_hours=5.0,
-        end_hours=10.0,
-        intensity_mm_hr=20.0,
-        zones=rain_zones
+    rain_scenario = RainScenario.from_datetime_csv(
+        config.data_input_dir / "BB_METEO.csv",
+        time_converter=config.time_converter,
+        zones=rain_zones,
+        start_datetime=config.start_datetime,
+        end_datetime=config.end_datetime
     )
 
     # ==========================================
@@ -55,10 +57,18 @@ def main():
     # ==========================================
     # 4. CREATE BOUNDARY CONDITION MANAGER
     # ==========================================
+    water_table_trend={
+            'start_datetime': datetime(2024, 2, 22),  # Trend starts at COMSOL reference date
+            'end_datetime': datetime(2024, 12, 31),    # 315 days later
+            'H0_start': 1.2,
+            'H0_end': 1.0
+        }
+    
     bc_manager = BoundaryConditionManager(
         V,
         initial_water_table=1.2,
-        #water_table_trend={'t_end': 315*86400, 'H0_end': 1.0}
+        water_table_trend=None,
+        time_converter=config.time_converter
     )
     
     # ==========================================
@@ -81,7 +91,7 @@ def main():
     # ==========================================
     # 6. CREATE SOLVER
     # ==========================================
-    solver = RichardsSolver(mesh, V, domain, rain_event, bc_manager, config)
+    solver = RichardsSolver(mesh, V, domain, rain_scenario, bc_manager, config)
         
     # ==========================================
     # 7. RUN SIMULATION
@@ -96,10 +106,15 @@ def main():
     plotter = ResultsPlotter(config, mesh)
     plotter.plot_complete_results(
         probe_data=probe_manager.get_data(),
-        snapshots=snapshot_manager.snapshots,
-        rain_scenario=rain_event,
+        #snapshots=snapshot_manager.snapshots,
+        rain_scenario=rain_scenario,
         filename=config.output_dir / f'rain_simulation_{now}_TEST.png',
+        comsol_data_file=config.data_input_dir / "RAF_COMSOL_PZ_CG.csv",
+        comsol_ref_date=datetime(2024, 2, 22),  # COMSOL t=0 corresponds to February 22, 2024
+        measured_data_file=config.data_input_dir / "MEASURED_PZ_CG.csv",
+        measured_offset=0.6,  # Add 60cm to measured data
     )
+    
     
     # ==========================================
     # 9. CREATE GIF ANIMATION (OPTIONAL)

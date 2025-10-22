@@ -3,6 +3,7 @@ Boundary condition management for Richards equation
 Single source of truth for water table configuration
 """
 from firedrake import DirichletBC, Function
+from datetime import datetime, timedelta
 
 class BoundaryConditionManager:
     """
@@ -13,7 +14,7 @@ class BoundaryConditionManager:
     - Linear trend: declining or rising over time
     """
     
-    def __init__(self, V, initial_water_table=1.2, water_table_trend=None):
+    def __init__(self, V, initial_water_table=1.2, water_table_trend=None, time_converter=None):
         """
         Initialize boundary condition manager
         
@@ -23,42 +24,98 @@ class BoundaryConditionManager:
                 Initial water table elevation (m)
                 Used if water_table_trend is None
             water_table_trend: dict or None
-                For time-varying water table:
+                For time-varying water table. Can use either seconds or datetime:
+                
+                Option 1 - Seconds (legacy):
                 {
                     't_end': float (seconds),
                     'H0_end': float (m)
                 }
-                Linear trend from initial_water_table → H0_end over [0, t_end]
+                
+                Option 2 - Datetime (recommended):
+                {
+                    'start_datetime': datetime (optional, defaults to simulation start),
+                    'end_datetime': datetime,
+                    'H0_start': float (m),
+                    'H0_end': float (m)
+                }
+                
+                Linear trend from H0_start → H0_end
+            
+            time_converter: TimeConverter object (required if using datetime mode)
                 
         Examples:
             # Constant water table at 1.5m
             bc = BoundaryConditionManager(V, initial_water_table=1.5)
             
-            # Declining: 1.5m → 1.0m over 1 year
+            # Declining: 1.5m → 1.0m over 1 year (seconds mode)
             bc = BoundaryConditionManager(
                 V, 
                 initial_water_table=1.5,
                 water_table_trend={'t_end': 365*86400, 'H0_end': 1.0}
             )
+            
+            # Declining: 1.2m → 1.0m from Feb 22 to Dec 31, 2024 (datetime mode)
+            bc = BoundaryConditionManager(
+                V, 
+                initial_water_table=1.2,
+                water_table_trend={
+                    'start_datetime': datetime(2024, 2, 22),
+                    'end_datetime': datetime(2024, 12, 31),
+                    'H0_start': 1.2,
+                    'H0_end': 1.0
+                },
+                time_converter=config.time_converter
+            )
         """
         self.V = V
         self.mesh = V.mesh()
+        self.time_converter = time_converter
         
         # Water table configuration
         self.H0_initial = initial_water_table
         self.use_trend = water_table_trend is not None
         
         if self.use_trend:
-            self.t_start = 0.0
-            self.t_end = water_table_trend['t_end']
-            self.H0_end = water_table_trend['H0_end']
+            # Check if using datetime or seconds mode
+            if 'end_datetime' in water_table_trend:
+                # Datetime mode
+                if time_converter is None:
+                    raise ValueError("time_converter required when using end_datetime in water_table_trend")
+                
+                # Get trend parameters
+                start_datetime = water_table_trend.get('start_datetime', time_converter.start)
+                end_datetime = water_table_trend['end_datetime']
+                H0_start = water_table_trend.get('H0_start', initial_water_table)
+                H0_end = water_table_trend['H0_end']
+                
+                # Convert to seconds relative to simulation start
+                self.t_start = time_converter.to_seconds(start_datetime)
+                self.t_end = time_converter.to_seconds(end_datetime)
+                self.H0_start = H0_start
+                self.H0_end = H0_end
+                
+                # Linear slope: H0(t) = H0_start + slope × (t - t_start)
+                self.slope = (self.H0_end - self.H0_start) / (self.t_end - self.t_start)
+                
+                print(f"Water table trend (datetime mode):")
+                print(f"  From: {start_datetime.strftime('%Y-%m-%d')} at {H0_start:.3f} m")
+                print(f"  To:   {end_datetime.strftime('%Y-%m-%d')} at {H0_end:.3f} m")
+                print(f"  Slope: {self.slope * 86400 * 1000:.3f} mm/day")
+            else:
+                # Seconds mode (legacy)
+                self.t_start = 0.0
+                self.t_end = water_table_trend['t_end']
+                self.H0_start = initial_water_table
+                self.H0_end = water_table_trend['H0_end']
+                
+                # Linear slope: H0(t) = H0_initial + slope × t
+                self.slope = (self.H0_end - self.H0_start) / self.t_end
+                
+                print(f"Water table trend (seconds mode):")
+                print(f"  Initial: {self.H0_start:.3f} m")
+                print(f"  Final:   {self.H0_end:.3f} m at t={self.t_end/86400:.1f} days")
             
-            # Linear slope: H0(t) = H0_initial + slope × t
-            self.slope = (self.H0_end - self.H0_initial) / self.t_end
-            
-            print(f"Water table trend:")
-            print(f"  Initial: {self.H0_initial:.3f} m")
-            print(f"  Final:   {self.H0_end:.3f} m ")
         else:
             print(f"Water table: constant at {self.H0_initial:.3f} m")
         
@@ -98,11 +155,11 @@ class BoundaryConditionManager:
         
         # Linear interpolation (clamp to bounds)
         if t <= self.t_start:
-            return self.H0_initial
+            return self.H0_start
         elif t >= self.t_end:
             return self.H0_end
         else:
-            return self.H0_initial + self.slope * t
+            return self.H0_start + self.slope * (t - self.t_start)
     
     def get_dirichlet_bcs(self, t=0.0) -> list:
         """

@@ -126,7 +126,9 @@ class TimeConverter:
                          value_columns: Optional[List[str]] = None,
                          datetime_format: Optional[str] = None,
                          delimiter: Optional[str] = None,
-                         encoding: str = 'utf-8-sig') -> dict:
+                         encoding: str = 'utf-8-sig',
+                         start_datetime: Optional[datetime] = None,
+                         end_datetime: Optional[datetime] = None) -> dict:
         """
         Load CSV with datetime column and convert to simulation seconds
         
@@ -137,6 +139,8 @@ class TimeConverter:
             datetime_format: Format string for datetime parsing (None = auto-detect)
             delimiter: CSV delimiter (None = auto-detect from ;, or \t)
             encoding: File encoding
+            start_datetime: Filter data >= this datetime (None = no filter)
+            end_datetime: Filter data <= this datetime (None = no filter)
             
         Returns:
             Dictionary with 'times' (in seconds) and value columns
@@ -152,7 +156,9 @@ class TimeConverter:
                 'BB_METEO.csv',
                 datetime_column='Date/Heure',
                 value_columns=['Pluie tot. (mm)'],
-                delimiter=';'
+                delimiter=';',
+                start_datetime=datetime(2024, 8, 1),
+                end_datetime=datetime(2024, 8, 31)
             )
             
             # Returns: {'times': [0, 86400, ...], 'Pluie tot. (mm)': [0, 1.5, ...]}
@@ -203,6 +209,13 @@ class TimeConverter:
             date_str = row[datetime_col].strip()
             try:
                 dt = self.parse_datetime(date_str, datetime_format)
+                
+                # Apply datetime filters
+                if start_datetime and dt < start_datetime:
+                    continue
+                if end_datetime and dt > end_datetime:
+                    continue
+                
                 datetimes.append(dt)
                 
                 # Parse values (handle comma decimal separator)
@@ -229,6 +242,8 @@ class TimeConverter:
         
         print(f"✓ Loaded {csv_path}")
         print(f"  Date range: {datetimes[0]} to {datetimes[-1]}")
+        if start_datetime or end_datetime:
+            print(f"  Filtered: {start_datetime or 'any'} to {end_datetime or 'any'}")
         print(f"  Simulation time: 0s to {times_seconds[-1]:.0f}s ({times_seconds[-1]/86400:.1f} days)")
         print(f"  Columns: {value_cols}")
         

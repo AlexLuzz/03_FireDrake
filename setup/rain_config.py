@@ -1,6 +1,7 @@
 # physics/rain_config.py
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
+from datetime import datetime
 import numpy as np
 import csv
 
@@ -270,7 +271,9 @@ class RainScenario:
                           rain_column: str = 'Pluie',
                           rain_unit: str = 'mm/day',
                           zones: List[RainZone] = None,
-                          delimiter: Optional[str] = None):
+                          delimiter: Optional[str] = None,
+                          start_datetime: Optional['datetime'] = None,
+                          end_datetime: Optional['datetime'] = None):
         """
         Load rain events from CSV with datetime column
         
@@ -288,6 +291,8 @@ class RainScenario:
             rain_unit: "mm/day" or "mm/hour"
             zones: Optional spatial zones
             delimiter: CSV delimiter (auto-detect if None)
+            start_datetime: Only load data >= this datetime (default: use all data)
+            end_datetime: Only load data <= this datetime (default: use all data)
         
         Returns:
             RainScenario with events starting at t=0
@@ -295,6 +300,15 @@ class RainScenario:
         Example:
             from tools import TimeConverter
             from setup import RainScenario
+            from datetime import datetime
+            
+            converter = TimeConverter(start_datetime=datetime(2024, 8, 15))
+            rain = RainScenario.from_datetime_csv(
+                'BB_METEO.csv',
+                time_converter=converter,
+                start_datetime=datetime(2024, 8, 15),
+                end_datetime=datetime(2024, 8, 21)
+            )
             
             converter = TimeConverter(start_datetime=datetime(2024, 1, 1))
             rain = RainScenario.from_datetime_csv(
@@ -303,14 +317,15 @@ class RainScenario:
                 datetime_column='Date/Heure',
                 rain_column='Pluie tot. (mm)',
                 rain_unit='mm/day'
-            )
         """
-        # Load data using TimeConverter
+        # Load data using TimeConverter with optional datetime filtering
         data = time_converter.load_datetime_csv(
             csv_path,
             datetime_column=datetime_column,
             value_columns=[rain_column],
-            delimiter=delimiter
+            delimiter=delimiter,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime
         )
         
         times_seconds = data['times']
@@ -469,33 +484,4 @@ if __name__ == "__main__":
     scenario3 = RainScenario(events)
     scenario3.print_summary()
     
-    # Example 4: Create example CSV
-    print("\n4. Creating example CSV file")
-    print("-" * 40)
     
-    # Create example CSV without pandas
-    with open('rain_events_example.csv', 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['time_hours', 'intensity_mm_hr'])
-        writer.writerow([0.0, 0.0])
-        writer.writerow([3.0, 0.0])
-        writer.writerow([3.0, 20.0])
-        writer.writerow([5.0, 20.0])
-        writer.writerow([5.0, 0.0])
-        writer.writerow([10.0, 0.0])
-        writer.writerow([10.0, 40.0])
-        writer.writerow([12.0, 40.0])
-        writer.writerow([12.0, 0.0])
-        writer.writerow([24.0, 0.0])
-    
-    print("Created rain_events_example.csv")
-    
-    # Display contents
-    with open('rain_events_example.csv', 'r') as f:
-        print(f.read())
-    
-    # Load from CSV
-    scenario4 = RainScenario.from_csv('rain_events_example.csv')
-    scenario4.print_summary()
-    
-    print("=" * 60)

@@ -6,12 +6,10 @@ from datetime import datetime
 from pathlib import Path
 import numpy as np
 import pandas as pd
-
 from firedrake import *
-from config import SimulationConfig
 from physics import *
 from solver import *
-from params_optimization import *
+from jax_sensitivity_analyzer import *
 
 
 # ============================================================

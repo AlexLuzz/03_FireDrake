@@ -20,7 +20,9 @@ class ResultsPlotter:
 
     def plot_complete_results(self, probe_data, snapshots=None, rain_scenario=None, 
                              filename=None, comsol_data_file=None, measured_data_file=None,
-                             plot_residuals=False, start_from=0.0, plot_dates=True):
+                             plot_residuals=False, plot_dates=True,
+                             comsol_ref_date=None, measured_ref_date=None,
+                             measured_offset=0.0):
         """
         Create complete results figure
         
@@ -31,10 +33,26 @@ class ResultsPlotter:
             filename: Output filename (optional)
             comsol_data_file: Path to CSV with COMSOL modeled data
             measured_data_file: Path to CSV with real measured data
-            plot_residuals: Whether to plot residuals
-            start_from: Time in days to start COMSOL data from (shifts time axis so this becomes t=0)
+            plot_residuals: Whether to plot COMSOL residuals (auto-enabled if comsol_data_file provided)
             plot_dates: If True and config has time_converter, plot with datetime x-axis (default: True)
+            comsol_ref_date: Reference datetime for COMSOL t=0 (e.g., datetime(2024, 3, 3))
+            measured_ref_date: Reference datetime for measured data (auto-inferred from config if None)
+            measured_offset: Vertical offset to add to measured data in meters (e.g., 0.6 for 60cm)
         """
+        # Calculate start_from automatically if we have datetime config
+        start_from = 0.0  # Default
+        if hasattr(self.config, 'start_datetime') and self.config.start_datetime and comsol_ref_date:
+            # Calculate days between comsol_ref_date and simulation start
+            start_from = (self.config.start_datetime - comsol_ref_date).total_seconds() / 86400.0
+            print(f"ℹ️  Auto-calculated start_from: {start_from:.1f} days "
+                  f"(from {comsol_ref_date.strftime('%Y-%m-%d')} to {self.config.start_datetime.strftime('%Y-%m-%d')})")
+        
+        # Auto-infer measured_ref_date from config if not provided
+        if measured_data_file and measured_ref_date is None:
+            if hasattr(self.config, 'start_datetime') and self.config.start_datetime:
+                measured_ref_date = self.config.start_datetime
+                print(f"ℹ️  Using config start_datetime as measured_ref_date: {measured_ref_date.strftime('%Y-%m-%d')}")
+        
         # Determine if we can use datetime axis
         use_datetime = plot_dates and hasattr(self.config, 'time_converter') and self.config.time_converter is not None
         
@@ -47,15 +65,22 @@ class ResultsPlotter:
                 comsol_data_file, 
                 start_from, 
                 probe_data['times'][-1] / 3600.0 / 24.0,
-                data_type='COMSOL'
+                data_type='COMSOL',
+                ref_date=comsol_ref_date
             )
+            # Auto-enable residuals if COMSOL data loaded
+            if comsol_data and not plot_residuals:
+                plot_residuals = True
         
         if measured_data_file:
+            # For measured data, use start_from=0 since it's already aligned to simulation start
             measured_data = self._load_and_align_data(
                 measured_data_file,
-                start_from,
-                probe_data['times'][-1] / 3600.0 / 24.0,
-                data_type='Measured'
+                start_from=0.0,  # Measured data ref_date is simulation start, so no offset needed
+                sim_duration_days=probe_data['times'][-1] / 3600.0 / 24.0,
+                data_type='Measured',
+                ref_date=measured_ref_date,
+                offset=measured_offset
             )
         
         # Calculate layout
@@ -118,7 +143,46 @@ class ResultsPlotter:
         print(f"\n✓ Plot saved: {filename}")
         plt.close()
     
-    def _load_and_align_data(self, csv_path, start_from, sim_duration_days, data_type='Data'):
+    def _smooth_data(self, times, data, window_hours=3.0):
+        """
+        Apply sliding window smoothing to noisy data
+        
+        Args:
+            times: Time array in days
+            data: Data array with potential NaN values
+            window_hours: Window size in hours for smoothing (default: 1 hour)
+        
+        Returns:
+            Smoothed data array
+        """
+        # Remove NaN values for smoothing
+        valid_mask = ~np.isnan(data)
+        if not np.any(valid_mask):
+            return data
+        
+        times_valid = times[valid_mask]
+        data_valid = data[valid_mask]
+        
+        # Convert window to days
+        window_days = window_hours / 24.0
+        
+        # Apply sliding window average
+        smoothed = np.zeros_like(data_valid)
+        for i, t in enumerate(times_valid):
+            # Find points within window
+            window_mask = np.abs(times_valid - t) <= window_days / 2.0
+            if np.any(window_mask):
+                smoothed[i] = np.mean(data_valid[window_mask])
+            else:
+                smoothed[i] = data_valid[i]
+        
+        # Put smoothed data back into full array with NaNs
+        result = np.full_like(data, np.nan)
+        result[valid_mask] = smoothed
+        
+        return result
+    
+    def _load_and_align_data(self, csv_path, start_from, sim_duration_days, data_type='Data', ref_date=None, offset=0.0):
         """
         Load data (COMSOL or measured) and align it with simulation time
         
@@ -127,6 +191,8 @@ class ResultsPlotter:
             start_from: Time (days) to map to simulation t=0
             sim_duration_days: Simulation duration in days
             data_type: 'COMSOL' or 'Measured' for logging
+            ref_date: Reference datetime for t=0 (required if CSV has datetime strings)
+            offset: Vertical offset to add to all data values (e.g., 0.6 for 60cm)
         
         Returns:
             Dictionary with aligned time and data arrays, or None if error
@@ -138,21 +204,103 @@ class ResultsPlotter:
                 delimiter = ';' if ';' in first_line else ','
                 f.seek(0)
                 reader = csv.DictReader(f, delimiter=delimiter)
-                rows = [{k.strip(): v.strip().replace(',', '.') for k, v in row.items()} 
+                rows = [{k.strip(): v.strip() for k, v in row.items()} 
                         for row in reader]
             
-            # Find time column
-            time_col = next((k for k in rows[0].keys() if 'time' in k.lower()), None)
+            # Find time/date column
+            time_col = None
+            for k in rows[0].keys():
+                if any(term in k.lower() for term in ['time', 'date', 'jour', 'day']):
+                    time_col = k
+                    break
+            
             if not time_col:
-                print(f"⚠️  No time column found in {csv_path}")
+                print(f"⚠️  No time/date column found in {csv_path}")
                 return None
             
-            # Parse all data
-            times_raw = np.array([float(row[time_col]) for row in rows])
+            # Try to parse times - could be floats or datetime strings
+            times_raw = []
+            is_datetime_col = False
+            
+            for row in rows:
+                time_str = row[time_col]
+                try:
+                    # Try parsing as float first
+                    times_raw.append(float(time_str.replace(',', '.')))
+                except ValueError:
+                    # Must be a datetime string
+                    is_datetime_col = True
+                    break
+            
+            # If datetime strings, need to parse them
+            if is_datetime_col:
+                if ref_date is None:
+                    print(f"⚠️  {data_type} data has datetime strings but no ref_date provided")
+                    return None
+                
+                from datetime import datetime
+                times_raw = []
+                for row in rows:
+                    date_str = row[time_col]
+                    # Try common European date formats
+                    for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%Y/%m/%d']:
+                        try:
+                            dt = datetime.strptime(date_str, fmt)
+                            # Convert to days from ref_date
+                            days_diff = (dt - ref_date).total_seconds() / 86400.0
+                            times_raw.append(days_diff)
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        print(f"⚠️  Could not parse date: {date_str}")
+                        return None
+                
+                times_raw = np.array(times_raw)
+                print(f"✓ Parsed {len(times_raw)} datetime strings from {data_type} data")
+            else:
+                times_raw = np.array(times_raw)
+            
+            # Parse data columns - look for LTC or Level columns
             data_raw = {}
+            column_mapping = {}  # Map original column names to standardized LTC names
+            
             for col in rows[0].keys():
-                if col.startswith('LTC'):
-                    data_raw[col] = np.array([float(row[col]) for row in rows])
+                if col.startswith('LTC') or 'ltc' in col.lower() or 'level' in col.lower():
+                    try:
+                        # Parse values, replacing empty strings with NaN
+                        values = []
+                        for row in rows:
+                            val_str = row[col].replace(',', '.').strip()
+                            if val_str == '' or val_str == 'nan':
+                                values.append(np.nan)
+                            else:
+                                values.append(float(val_str))
+                        
+                        data_raw[col] = np.array(values)
+                        
+                        # Standardize column names: "Level 101" -> "LTC 101", "Level 102" -> "LTC 102", etc.
+                        if 'level' in col.lower():
+                            # Extract number from "Level 101 (m)" or "Level 101"
+                            import re
+                            match = re.search(r'(\d+)', col)
+                            if match:
+                                num = match.group(1)
+                                standardized_name = f"LTC {num}"
+                                column_mapping[col] = standardized_name
+                        else:
+                            column_mapping[col] = col
+                            
+                    except ValueError as e:
+                        print(f"⚠️  Could not parse column {col}: {e}")
+                        continue
+            
+            if not data_raw:
+                print(f"⚠️  No LTC/Level data columns found in {csv_path}")
+                return None
+            
+            # Apply column name mapping
+            data_raw = {column_mapping[k]: v for k, v in data_raw.items()}
             
             print(f"✓ Loaded {data_type} data: {list(data_raw.keys())}")
             print(f"  Raw time range: {times_raw[0]:.2f} to {times_raw[-1]:.2f} days ({len(times_raw)} points)")
@@ -174,6 +322,17 @@ class ResultsPlotter:
             
             times_aligned = times_shifted[mask_clip]
             data_aligned = {k: v[mask_clip] for k, v in data_filtered.items()}
+            
+            # Apply smoothing to measured data (it's typically much noisier than COMSOL)
+            if data_type == 'Measured':
+                print(f"  Applying sliding window smoothing to measured data (1-hour window)...")
+                data_aligned = {k: self._smooth_data(times_aligned, v, window_hours=1.0) 
+                               for k, v in data_aligned.items()}
+            
+            # Apply vertical offset if specified
+            if offset != 0.0:
+                print(f"  Applying vertical offset: {offset:+.2f} m to {data_type} data")
+                data_aligned = {k: v + offset for k, v in data_aligned.items()}
             
             # Create final aligned dictionary
             aligned_data = {'times': times_aligned}
@@ -203,49 +362,78 @@ class ResultsPlotter:
         
         # Plot simulated data (Firedrake)
         for i, (name, data) in enumerate(probe_data['data'].items()):
+            # Extract clean probe name (e.g., "LTC 1 (x=8.0m, y=1.0m)" -> "LTC 1")
+            clean_name = name.split('(')[0].strip()
             ax.plot(times_plot, data, color=colors[i], linewidth=2.5, 
-                   label=f'{name} (Firedrake)', marker='o', markersize=3, 
+                   label=f'{clean_name} - Firedrake simulation', marker='o', markersize=3, 
                    markevery=max(1, len(times_plot)//30))
+        
+        # Determine x-axis limits based on available data
+        x_min = times_plot[0]
+        x_max = times_plot[-1]
+        has_reference_data = False
         
         # Plot COMSOL data if available
         if comsol_data:
+            has_reference_data = True
             if use_datetime:
                 # COMSOL data times are in days from simulation start
                 times_comsol = [self.config.time_converter.to_datetime(t * 86400) for t in comsol_data['times']]
             else:
                 times_comsol = comsol_data['times'] * 24  # days to hours
             
+            # Update x-limits to where COMSOL data exists
+            x_min = max(x_min, times_comsol[0])
+            x_max = min(x_max, times_comsol[-1])
+            
             for i, ltc_name in enumerate(['LTC 101', 'LTC 102', 'LTC 103']):
                 if ltc_name in comsol_data:
+                    # Map LTC 101/102/103 to LTC 1/2/3 for consistency
+                    display_name = f"LTC {i+1}"
                     ax.plot(times_comsol, comsol_data[ltc_name],
                            color=colors[i], linewidth=2, linestyle='--',
-                           label=f'{ltc_name} (COMSOL)', marker='s', markersize=4,
+                           label=f'{display_name} - COMSOL model', marker='s', markersize=4,
                            markevery=max(1, len(times_comsol)//20), alpha=0.8)
         
         # Plot measured data if available
         if measured_data:
+            has_reference_data = True
             if use_datetime:
                 times_measured = [self.config.time_converter.to_datetime(t * 86400) for t in measured_data['times']]
             else:
                 times_measured = measured_data['times'] * 24
             
+            # Update x-limits to where measured data exists
+            x_min = max(x_min, times_measured[0])
+            x_max = min(x_max, times_measured[-1])
+            
             for i, ltc_name in enumerate(['LTC 101', 'LTC 102', 'LTC 103']):
                 if ltc_name in measured_data:
-                    ax.plot(times_measured, measured_data[ltc_name],
-                           color=colors[i], linewidth=2, linestyle=':',
-                           label=f'{ltc_name} (Measured)', marker='^', markersize=5,
-                           markevery=max(1, len(times_measured)//20), alpha=0.8)
+                    # Map LTC 101/102/103 to LTC 1/2/3 for consistency
+                    display_name = f"LTC {i+1}"
+                    # Filter out NaN values for cleaner plotting
+                    valid_mask = ~np.isnan(measured_data[ltc_name])
+                    times_valid = [t for t, v in zip(times_measured, valid_mask) if v]
+                    data_valid = measured_data[ltc_name][valid_mask]
+                    
+                    ax.plot(times_valid, data_valid,
+                           color=colors[i], linewidth=1.5, linestyle=':',
+                           label=f'{display_name} - Field measurements', marker='^', markersize=3,
+                           markevery=max(1, len(times_valid)//15), alpha=0.7)
         
         # Rain event shading
         if rain_scenario:
-            for event in rain_scenario.events:
+            for idx, event in enumerate(rain_scenario.events):
                 if use_datetime:
                     start_dt = self.config.time_converter.to_datetime(event.start_time * 3600)
                     end_dt = self.config.time_converter.to_datetime(event.end_time * 3600)
-                    ax.axvspan(start_dt, end_dt, alpha=0.15, color='lightblue', label='Rain')
+                    # Only add label for first rain event to avoid duplicates
+                    ax.axvspan(start_dt, end_dt, alpha=0.15, color='lightblue', 
+                              label='Rain event' if idx == 0 else '')
                 else:
                     ax.axvspan(event.start_time, event.end_time, 
-                              alpha=0.15, color='lightblue', label='Rain')
+                              alpha=0.15, color='lightblue', 
+                              label='Rain event' if idx == 0 else '')
         
         ax.set_ylabel('Water Table Elevation (m)', fontsize=12, fontweight='bold')
         if show_xlabel:
@@ -262,10 +450,14 @@ class ResultsPlotter:
         
         ax.grid(True, alpha=0.3)
         
-        if use_datetime:
-            ax.set_xlim([times_plot[0], times_plot[-1]])
+        # Set x-limits to where reference data exists (if any), otherwise full simulation
+        if has_reference_data:
+            ax.set_xlim([x_min, x_max])
         else:
-            ax.set_xlim([0, times_plot[-1]])
+            if use_datetime:
+                ax.set_xlim([times_plot[0], times_plot[-1]])
+            else:
+                ax.set_xlim([0, times_plot[-1]])
         
         # Remove duplicate labels in legend
         handles, labels = ax.get_legend_handles_labels()
@@ -343,10 +535,8 @@ class ResultsPlotter:
         
         ax.grid(True, alpha=0.3)
         
-        if use_datetime:
-            ax.set_xlim([times_sim[0], times_sim[-1]])
-        else:
-            ax.set_xlim([0, times_sim[-1]])
+        # Set x-limits to match reference data extent
+        ax.set_xlim([times_ref[0], times_ref[-1]])
     
     def _plot_snapshots(self, fig, gs, snapshots, start_row, use_datetime=False):
         """Plot spatial snapshots (6 plots in 2x3 grid)"""

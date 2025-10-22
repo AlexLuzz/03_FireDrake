@@ -1,7 +1,10 @@
 """
 Main Richards equation solver
 """
-from firedrake import *
+from firedrake import (
+    Function, TrialFunction, TestFunction, Constant, SpatialCoordinate,
+    dx, ds, lhs, rhs, solve, conditional, And, as_vector, grad, dot
+)
 import numpy as np
 
 class RichardsSolver:
