@@ -3,7 +3,6 @@ Coupled Richards Equation and Chloride Transport - SIMPLIFIED
 Sequential coupling: Flow → Velocity → Transport
 """
 from firedrake import *
-import numpy as np
 
 class CoupledFlowTransport:
     """
@@ -90,12 +89,7 @@ class CoupledFlowTransport:
         """
         t = 0.0
         step = 0
-        
-        # Output files
-        p_file = File("results/pressure.pvd")
-        c_file = File("results/concentration.pvd")
-        v_file = File("results/velocity.pvd")
-        
+
         print(f"Running coupled simulation: {t_end/3600:.1f} hours, dt={dt}s")
         
         while t < t_end:
@@ -131,13 +125,6 @@ class CoupledFlowTransport:
                 if hasattr(snapshot_manager, 'record_field'):
                     snapshot_manager.record_field(t, self.transport.c, 'concentration')
                     snapshot_manager.record_field(t, self.velocity, 'velocity')
-            
-            # Save to pvd files
-            if step % max(1, int(3600/dt)) == 0:
-                p_file.write(self.richards.p_new, time=t)
-                c_file.write(self.transport.c, time=t)
-                v_file.write(self.velocity, time=t)
-                print(f"  t = {t/3600:.1f}h")
         
         print(f"Done! {step} steps")
         

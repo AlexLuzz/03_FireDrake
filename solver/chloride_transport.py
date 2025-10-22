@@ -98,7 +98,23 @@ class ChlorideTransport:
         S = θ/n (degree of saturation, 0-1)
         """
         self.saturation.assign(saturation)
+    
+    def set_initial_condition(self, c_init):
+        """
+        Set initial chloride concentration
         
+        Parameters:
+        -----------
+        c_init : float or Function
+            Initial concentration (mol/m³ or mg/L)
+            Example: 0.0 (no chloride initially)
+        """
+        if isinstance(c_init, (int, float)):
+            self.c.assign(Constant(c_init))
+        else:
+            self.c.assign(c_init)
+        self.c_n.assign(self.c)
+    
     # ============================================================================
     # DIFFUSION TERM: ∇·(D_eff ∇c)
     # ============================================================================
@@ -325,18 +341,3 @@ class ChlorideTransport:
         
         return self.c
     
-    def set_initial_condition(self, c_init):
-        """
-        Set initial chloride concentration
-        
-        Parameters:
-        -----------
-        c_init : float or Function
-            Initial concentration (mol/m³ or mg/L)
-            Example: 0.0 (no chloride initially)
-        """
-        if isinstance(c_init, (int, float)):
-            self.c.assign(Constant(c_init))
-        else:
-            self.c.assign(c_init)
-        self.c_n.assign(self.c)

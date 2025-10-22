@@ -120,19 +120,105 @@ class RichardsSolver:
         p = TrialFunction(self.V)  # Unknown pressure head (to solve for)
         q = TestFunction(self.V)   # Test function (mathematical trick for FEM)
 
+        # ============================================================================
+        # WEAK FORMULATION DERIVATION FOR RICHARDS EQUATION
+        # ============================================================================
+
+        # STRONG FORM (PDE to solve):
+        # -----------------------------------------------------------------------------
+        # C(Hp) ∂Hp/∂t = ∇·[K(Hp)(∇Hp + ∇z)] + source terms
+        #
+        # where:
+        #   Hp = pressure head [L]
+        #   C(Hp) = specific moisture capacity = ∂θ/∂Hp [1/L]
+        #   K(Hp) = hydraulic conductivity (depends on saturation) [L/T]
+        #   ∇z = gravity gradient (vertical direction) [-]
+        #   θ = volumetric water content [-] (used in C(Hp) and K(Hp))
+
+        # STEP 1: TIME DISCRETIZATION (Backward Euler)
+        # -----------------------------------------------------------------------------
+        # Discretize time derivative using implicit scheme:
+        #   ∂Hp/∂t ≈ (Hp^{n+1} - Hp^n) / Δt
+        #
+        # This gives us:
+        #   C^n · (Hp^{n+1} - Hp^n)/Δt = ∇·[K^n(∇Hp^{n+1} + ∇z)]
+        #
+        # Note: We use values from previous time step (n) for C and K to linearize
+        # the problem, making it easier to solve (Picard iteration)
+
+        # STEP 2: WEAK FORMULATION (Galerkin Method)
+        # -----------------------------------------------------------------------------
+        # Multiply both sides by test function q and integrate over domain Ω:
+        #
+        #   ∫_Ω C^n · (Hp^{n+1} - Hp^n)/Δt · q dΩ = ∫_Ω ∇·[K^n(∇Hp^{n+1} + ∇z)] · q dΩ
+        #
+        # STEP 3: INTEGRATION BY PARTS (Green's first identity)
+        # -----------------------------------------------------------------------------
+        # For the right-hand side, apply divergence theorem:
+        #   ∫_Ω ∇·(K∇Hp) · q dΩ = -∫_Ω K∇Hp · ∇q dΩ + ∫_∂Ω K∇Hp · n · q d∂Ω
+        #
+        # The boundary integral (∫_∂Ω) contains flux boundary conditions
+        # The volume integral (∫_Ω) is what we keep in the weak form
+        #
+        # After integration by parts:
+        #   ∫_Ω C^n(Hp^{n+1} - Hp^n)/Δt · q dΩ = 
+        #       -∫_Ω K^n∇Hp^{n+1} · ∇q dΩ          [diffusion term]
+        #       -∫_Ω K^n∇z · ∇q dΩ                  [gravity term]
+        #       +∫_∂Ω flux_bc · q d∂Ω               [boundary fluxes]
+
+        # STEP 4: REARRANGE TO RESIDUAL FORM (F = 0)
+        # -----------------------------------------------------------------------------
+        # Move everything to left side to get residual form F(Hp^{n+1}) = 0:
+
         # Compute K field (K = kr * Ks)
         # Linearization: use K from previous time step (known values)
         K_field = self.kr_n * self.Ks_field
 
-        # Gravity vector (vertical direction)
-        gravity = as_vector([0, 1])  # ∇z = (0, 1) since z = y
+        # Gravity vector (vertical direction, pointing down in our convention)
+        # In 2D: ∇z = (∂z/∂x, ∂z/∂y) = (0, 1) assuming z increases upward
+        gravity = as_vector([0, 1])  # ∇z = (0, 1)
 
-        # Weak form of Richards equation: C·∂Hp/∂t = ∇·[K(∇Hp + ∇z)]
-        # After integration by parts and time discretization:
-        F = (self.Cm_n * (p - self.p_n) / self.config.dt * q * dx +  # Time derivative: C(Hp-Hp_n)/Δt
-            K_field * dot(grad(p), grad(q)) * dx +                   # Diffusion: K∇Hp·∇q
-            K_field * dot(gravity, grad(q)) * dx +                   # Gravity: K∇z·∇q
-            rain_flux * q * ds(4))  # Infiltration source on top boundary
+        # WEAK FORM RESIDUAL: F(p, q) = 0
+        # Each term corresponds to part of the weak formulation above
+        F = (
+            # TERM 1: TIME DERIVATIVE
+            # ∫_Ω C^n · (Hp^{n+1} - Hp^n)/Δt · q dΩ
+            # This represents the change in water content over time
+            self.Cm_n * (p - self.p_n) / self.config.dt * q * dx +
+            
+            # TERM 2: DIFFUSION (from -∫_Ω K∇Hp · ∇q dΩ)
+            # After integration by parts, we get positive sign here
+            # This represents water flow driven by pressure gradients
+            # dot(grad(p), grad(q)) = ∇p · ∇q
+            K_field * dot(grad(p), grad(q)) * dx +
+            
+            # TERM 3: GRAVITY (from -∫_Ω K∇z · ∇q dΩ)
+            # After integration by parts, we get positive sign here
+            # This represents water flow driven by gravity
+            # dot(gravity, grad(q)) = ∇z · ∇q = (0,1) · (∂q/∂x, ∂q/∂y) = ∂q/∂y
+            K_field * dot(gravity, grad(q)) * dx +
+            
+            # TERM 4: BOUNDARY FLUX (from ∫_∂Ω flux · q d∂Ω)
+            # This is the infiltration/rainfall boundary condition on top surface
+            # Positive rain_flux means water entering the domain
+            # ds(4) integrates over boundary marker 4 (top surface)
+            rain_flux * q * ds(4)
+        )
+
+        # SOLVING THE SYSTEM:
+        # We seek p (Hp^{n+1}) such that F(p, q) = 0 for all test functions q
+        # FEniCS will solve this using Newton's method or linear solver depending
+        # on whether the problem is nonlinear
+
+        # ============================================================================
+        # WHY THIS FORMULATION?
+        # ============================================================================
+        # 1. Integration by parts reduces continuity requirements on the solution
+        #    (C^0 continuity instead of C^1)
+        # 2. Natural boundary conditions (Neumann) automatically included via 
+        #    boundary integrals
+        # 3. Symmetric weak form (if K constant) leads to symmetric matrix system
+        # 4. Galerkin method ensures optimal approximation in H^1 norm
 
         # Split residual form F=0 into linear system a=L
         # lhs: extracts terms with unknown p → matrix A

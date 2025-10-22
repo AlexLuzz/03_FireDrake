@@ -14,9 +14,9 @@ def main():
     # ==========================================
     config = SimulationConfig(
         name="Datetime_Duration",
-        start_datetime=datetime(2024, 4, 1), # YYYY, MM, DD
-        end_datetime=datetime(2024, 8, 1),
-        dt_td=timedelta(hours=2),
+        start_datetime=datetime(2024, 5, 1), # YYYY, MM, DD
+        end_datetime=datetime(2024, 6, 1),
+        dt_td=timedelta(hours=4),
     )
     # ==========================================
     # 2. DEFINE RAIN SCENARIO
