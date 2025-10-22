@@ -11,7 +11,7 @@ class Domain:
     Provides smart constructors for common geometries
     """
     
-    def __init__(self, mesh, default_material):
+    def __init__(self, mesh, default_material, waxman_smits_model=None):
         """
         Initialize domain with default material
         
@@ -24,6 +24,9 @@ class Domain:
         self.materials = {}  # Dictionary of material regions
         self.is_homogeneous = True
         self.material_cache = {}  # Cache for performance
+
+        if waxman_smits_model is not None:
+            self.ws_model  = waxman_smits_model
     
     # ==========================================
     # SMART CONSTRUCTORS - Common Geometries
@@ -434,6 +437,66 @@ class Domain:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
         
         return fig
+    
+    def predict_resistivity_field(self, pressure_field, chloride_field=None,
+                                  background_sigma=0.02, temperature=25.0):
+        """
+        Predict bulk resistivity field from hydraulic state
+        Compare with your ERT measurements for validation/calibration
+        
+        Parameters:
+        -----------
+        pressure_field : Function
+            Pressure head from Richards solver
+        chloride_field : Function (optional)
+            Chloride concentration from transport solver (mg/L)
+            If None, assumes clean water
+        background_sigma : float
+            Background water conductivity (S/m) - measure this!
+        temperature : float
+            Soil temperature (°C)
+        
+        Returns:
+        --------
+        resistivity_field : np.ndarray (Ω·m)
+        """
+        if self.ws_model is None:
+            raise ValueError("No Waxman-Smits model set! Initialize Domain with ws_model.")
+        
+        coords = self.mesh.coordinates.dat.data
+        n_nodes = len(coords)
+        
+        # Get fields
+        p_vals = pressure_field.dat.data[:]
+        if chloride_field is not None:
+            cl_vals = chloride_field.dat.data[:]
+        else:
+            cl_vals = np.zeros(n_nodes)
+        
+        # Compute resistivity at each node
+        resistivity = np.zeros(n_nodes)
+        
+        for i, (x, y) in enumerate(coords):
+            # Get material properties
+            material = self.get_material_at_point(x, y)
+            porosity = material.porosity
+            
+            # Compute saturation from pressure
+            Hp = p_vals[i]
+            theta = material.water_content(Hp)
+            saturation = theta / porosity  # S = θ/φ
+            
+            # Get fluid conductivity from chloride
+            sigma_w = self.ws_model.fluid_conductivity_from_chloride(
+                cl_vals[i], temperature, background_sigma
+            )
+            
+            # Predict bulk resistivity
+            resistivity[i] = self.ws_model.bulk_resistivity(
+                porosity, saturation, sigma_w
+            )
+        
+        return resistivity
 
 if __name__ == "__main__":
     from firedrake import RectangleMesh, FunctionSpace
