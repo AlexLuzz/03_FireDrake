@@ -8,6 +8,7 @@ import numpy as np
 from scipy.interpolate import LinearNDInterpolator, interp1d
 from datetime import datetime
 import csv
+from tools.data_import import load_and_align_data, smooth_data
 
 
 class ResultsPlotter:
@@ -61,7 +62,7 @@ class ResultsPlotter:
         measured_data = None
         
         if comsol_data_file:
-            comsol_data = self._load_and_align_data(
+            comsol_data = load_and_align_data(
                 comsol_data_file, 
                 start_from, 
                 probe_data['times'][-1] / 3600.0 / 24.0,
@@ -74,7 +75,7 @@ class ResultsPlotter:
         
         if measured_data_file:
             # For measured data, use start_from=0 since it's already aligned to simulation start
-            measured_data = self._load_and_align_data(
+            measured_data = load_and_align_data(
                 measured_data_file,
                 start_from=0.0,  # Measured data ref_date is simulation start, so no offset needed
                 sim_duration_days=probe_data['times'][-1] / 3600.0 / 24.0,
@@ -143,208 +144,7 @@ class ResultsPlotter:
         print(f"\n✓ Plot saved: {filename}")
         plt.close()
     
-    def _smooth_data(self, times, data, window_hours=3.0):
-        """
-        Apply sliding window smoothing to noisy data
-        
-        Args:
-            times: Time array in days
-            data: Data array with potential NaN values
-            window_hours: Window size in hours for smoothing (default: 1 hour)
-        
-        Returns:
-            Smoothed data array
-        """
-        # Remove NaN values for smoothing
-        valid_mask = ~np.isnan(data)
-        if not np.any(valid_mask):
-            return data
-        
-        times_valid = times[valid_mask]
-        data_valid = data[valid_mask]
-        
-        # Convert window to days
-        window_days = window_hours / 24.0
-        
-        # Apply sliding window average
-        smoothed = np.zeros_like(data_valid)
-        for i, t in enumerate(times_valid):
-            # Find points within window
-            window_mask = np.abs(times_valid - t) <= window_days / 2.0
-            if np.any(window_mask):
-                smoothed[i] = np.mean(data_valid[window_mask])
-            else:
-                smoothed[i] = data_valid[i]
-        
-        # Put smoothed data back into full array with NaNs
-        result = np.full_like(data, np.nan)
-        result[valid_mask] = smoothed
-        
-        return result
-    
-    def _load_and_align_data(self, csv_path, start_from, sim_duration_days, data_type='Data', ref_date=None, offset=0.0):
-        """
-        Load data (COMSOL or measured) and align it with simulation time
-        
-        Args:
-            csv_path: Path to CSV file
-            start_from: Time (days) to map to simulation t=0
-            sim_duration_days: Simulation duration in days
-            data_type: 'COMSOL' or 'Measured' for logging
-            ref_date: Reference datetime for t=0 (required if CSV has datetime strings)
-            offset: Vertical offset to add to all data values (e.g., 0.6 for 60cm)
-        
-        Returns:
-            Dictionary with aligned time and data arrays, or None if error
-        """
-        try:
-            # Load raw data
-            with open(csv_path, 'r', encoding='utf-8-sig') as f:
-                first_line = f.readline()
-                delimiter = ';' if ';' in first_line else ','
-                f.seek(0)
-                reader = csv.DictReader(f, delimiter=delimiter)
-                rows = [{k.strip(): v.strip() for k, v in row.items()} 
-                        for row in reader]
-            
-            # Find time/date column
-            time_col = None
-            for k in rows[0].keys():
-                if any(term in k.lower() for term in ['time', 'date', 'jour', 'day']):
-                    time_col = k
-                    break
-            
-            if not time_col:
-                print(f"⚠️  No time/date column found in {csv_path}")
-                return None
-            
-            # Try to parse times - could be floats or datetime strings
-            times_raw = []
-            is_datetime_col = False
-            
-            for row in rows:
-                time_str = row[time_col]
-                try:
-                    # Try parsing as float first
-                    times_raw.append(float(time_str.replace(',', '.')))
-                except ValueError:
-                    # Must be a datetime string
-                    is_datetime_col = True
-                    break
-            
-            # If datetime strings, need to parse them
-            if is_datetime_col:
-                if ref_date is None:
-                    print(f"⚠️  {data_type} data has datetime strings but no ref_date provided")
-                    return None
-                
-                from datetime import datetime
-                times_raw = []
-                for row in rows:
-                    date_str = row[time_col]
-                    # Try common European date formats
-                    for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%Y/%m/%d']:
-                        try:
-                            dt = datetime.strptime(date_str, fmt)
-                            # Convert to days from ref_date
-                            days_diff = (dt - ref_date).total_seconds() / 86400.0
-                            times_raw.append(days_diff)
-                            break
-                        except ValueError:
-                            continue
-                    else:
-                        print(f"⚠️  Could not parse date: {date_str}")
-                        return None
-                
-                times_raw = np.array(times_raw)
-                print(f"✓ Parsed {len(times_raw)} datetime strings from {data_type} data")
-            else:
-                times_raw = np.array(times_raw)
-            
-            # Parse data columns - look for LTC or Level columns
-            data_raw = {}
-            column_mapping = {}  # Map original column names to standardized LTC names
-            
-            for col in rows[0].keys():
-                if col.startswith('LTC') or 'ltc' in col.lower() or 'level' in col.lower():
-                    try:
-                        # Parse values, replacing empty strings with NaN
-                        values = []
-                        for row in rows:
-                            val_str = row[col].replace(',', '.').strip()
-                            if val_str == '' or val_str == 'nan':
-                                values.append(np.nan)
-                            else:
-                                values.append(float(val_str))
-                        
-                        data_raw[col] = np.array(values)
-                        
-                        # Standardize column names: "Level 101" -> "LTC 101", "Level 102" -> "LTC 102", etc.
-                        if 'level' in col.lower():
-                            # Extract number from "Level 101 (m)" or "Level 101"
-                            import re
-                            match = re.search(r'(\d+)', col)
-                            if match:
-                                num = match.group(1)
-                                standardized_name = f"LTC {num}"
-                                column_mapping[col] = standardized_name
-                        else:
-                            column_mapping[col] = col
-                            
-                    except ValueError as e:
-                        print(f"⚠️  Could not parse column {col}: {e}")
-                        continue
-            
-            if not data_raw:
-                print(f"⚠️  No LTC/Level data columns found in {csv_path}")
-                return None
-            
-            # Apply column name mapping
-            data_raw = {column_mapping[k]: v for k, v in data_raw.items()}
-            
-            print(f"✓ Loaded {data_type} data: {list(data_raw.keys())}")
-            print(f"  Raw time range: {times_raw[0]:.2f} to {times_raw[-1]:.2f} days ({len(times_raw)} points)")
-            
-            # Filter, shift, and clip
-            mask_start = times_raw >= start_from
-            if not np.any(mask_start):
-                print(f"⚠️  No {data_type} data found at or after start_from={start_from:.2f} days")
-                return None
-            
-            times_filtered = times_raw[mask_start]
-            data_filtered = {k: v[mask_start] for k, v in data_raw.items()}
-            times_shifted = times_filtered - start_from
-            
-            mask_clip = times_shifted <= sim_duration_days
-            if not np.any(mask_clip):
-                print(f"⚠️  No {data_type} data in simulation range after shifting")
-                return None
-            
-            times_aligned = times_shifted[mask_clip]
-            data_aligned = {k: v[mask_clip] for k, v in data_filtered.items()}
-            
-            # Apply smoothing to measured data (it's typically much noisier than COMSOL)
-            if data_type == 'Measured':
-                print(f"  Applying sliding window smoothing to measured data (1-hour window)...")
-                data_aligned = {k: self._smooth_data(times_aligned, v, window_hours=1.0) 
-                               for k, v in data_aligned.items()}
-            
-            # Apply vertical offset if specified
-            if offset != 0.0:
-                print(f"  Applying vertical offset: {offset:+.2f} m to {data_type} data")
-                data_aligned = {k: v + offset for k, v in data_aligned.items()}
-            
-            # Create final aligned dictionary
-            aligned_data = {'times': times_aligned}
-            aligned_data.update(data_aligned)
-            
-            print(f"  Aligned {data_type} data: {len(times_aligned)} points in range [0, {sim_duration_days:.2f}] days")
-            
-            return aligned_data
-            
-        except Exception as e:
-            print(f"⚠️  Error loading {data_type} data: {e}")
-            return None
+
     
     def _plot_time_series(self, fig, gs_slice, probe_data, rain_scenario, 
                          comsol_data, measured_data, show_xlabel=True, use_datetime=False):
