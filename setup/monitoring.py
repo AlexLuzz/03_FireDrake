@@ -7,8 +7,15 @@ import numpy as np
 class ProbeManager:
     """Manages water table elevation monitoring at specific x-locations"""
     
-    def __init__(self, mesh, probes_positions, names=None):
+    def __init__(self, mesh, probes_positions=None, names=None):
         self.mesh = mesh
+        # Default probe positions if none provided
+        if probes_positions is None:
+            probes_positions = [
+                [8.0, 1.0],
+                [10.0, 1.0], 
+                [12.5, 1.0]
+            ]
         self.probes_positions = probes_positions
         self.names = names or [f"Probe_{i+1}" for i in range(len(probes_positions))]
         self.data = {name: [] for name in self.names}
@@ -20,6 +27,7 @@ class ProbeManager:
         self.x_tol = domain_width * 0.01  # 1% of domain width
         
         print(f"ProbeManager initialized with x_tol = {self.x_tol:.4f}m")
+        print(f"Probe positions: {self.probes_positions}")
 
     def find_water_table_at_probe_pos(self, pressure_field, probe_pos):
         """Find water table elevation (where p=0) at given probe position"""

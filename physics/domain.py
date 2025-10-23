@@ -3,7 +3,7 @@ Domain management for spatially variable soil properties
 Smart constructors for common multi-material scenarios
 """
 import numpy as np
-from firedrake import Function
+from firedrake import Function, RectangleMesh
 
 class Domain:
     """
@@ -11,63 +11,83 @@ class Domain:
     Provides smart constructors for common geometries
     """
     
-    def __init__(self, mesh, default_material, waxman_smits_model=None):
+    def __init__(self, mesh, default_material, Lx=None, Ly=None, nx=None, ny=None, waxman_smits_model=None):
         """
         Initialize domain with default material
         
         Args:
             mesh: Firedrake mesh
             default_material: SoilMaterial object to use as default
+            Lx, Ly: Domain dimensions (only needed if mesh was created externally)
+            nx, ny: Mesh resolution (only needed if mesh was created externally)
+            waxman_smits_model: Optional Waxman-Smits model for resistivity
         """
         self.mesh = mesh
         self.default_material = default_material
         self.materials = {}  # Dictionary of material regions
         self.is_homogeneous = True
         self.material_cache = {}  # Cache for performance
+        
+        # Store mesh parameters (will be set properly in smart constructors)
+        self.Lx = Lx
+        self.Ly = Ly
+        self.nx = nx
+        self.ny = ny
 
         if waxman_smits_model is not None:
-            self.ws_model  = waxman_smits_model
+            self.ws_model = waxman_smits_model
     
     # ==========================================
     # SMART CONSTRUCTORS - Common Geometries
     # ==========================================
     
     @classmethod
-    def homogeneous(cls, mesh, material):
+    def homogeneous(cls, material, Lx=20.0, Ly=5.0, nx=80, ny=40):
         """
-        Single uniform material everywhere
+        Single uniform material everywhere with rectangular mesh
         
         Args:
-            mesh: Firedrake mesh
             material: SoilMaterial object
+            Lx: Domain length (m) - default 20.0
+            Ly: Domain height (m) - default 5.0  
+            nx: Number of elements in x - default 80
+            ny: Number of elements in y - default 40
         
         Example:
-            domain = Domain.homogeneous(mesh, sand)
+            domain = Domain.homogeneous(sand, Lx=20.0, Ly=5.0, nx=80, ny=40)
         """
-        return cls(mesh, material)
+        mesh = RectangleMesh(nx, ny, Lx, Ly)
+        instance = cls(mesh, material, Lx=Lx, Ly=Ly, nx=nx, ny=ny)
+        return instance
     
     @classmethod
-    def horizontal_layers(cls, mesh, layers):
+    def horizontal_layers(cls, layers, Lx=20.0, Ly=5.0, nx=80, ny=40):
         """
-        Multiple horizontal layers from bottom to top
+        Multiple horizontal layers from bottom to top with rectangular mesh
         
         Args:
-            mesh: Firedrake mesh
             layers: List of (material, thickness) tuples from bottom to top
+            Lx: Domain length (m) - default 20.0
+            Ly: Domain height (m) - default 5.0  
+            nx: Number of elements in x - default 80
+            ny: Number of elements in y - default 40
         
         Example:
             # Three layers: gravel base, till, dirt on top
-            domain = Domain.horizontal_layers(mesh, [
+            domain = Domain.horizontal_layers([
                 (gravel, 1.0),  # 0-1m
                 (till, 2.0),    # 1-3m
                 (dirt, 2.0)     # 3-5m
-            ])
+            ], Lx=20.0, Ly=5.0, nx=80, ny=40)
         """
         if not layers:
             raise ValueError("Must provide at least one layer")
         
+        # Create mesh
+        mesh = RectangleMesh(nx, ny, Lx, Ly)
+        
         # Top layer is default
-        domain = cls(mesh, layers[-1][0])
+        domain = cls(mesh, layers[-1][0], Lx=Lx, Ly=Ly, nx=nx, ny=ny)
         
         # Add layers from bottom up
         y_bottom = 0.0
@@ -82,49 +102,25 @@ class Domain:
         
         return domain
     
-    @classmethod
-    def from_material_array(cls, mesh, material_ids, materials):
+    # ==========================================
+    # RECTANGLE HELPER (convenience method)
+    # ==========================================
+    
+    def add_rectangle(self, material, x_min, x_max, y_min, y_max, name=None):
         """
-        Define materials from 2D array (useful for complex geometries)
+        Add rectangular material region (convenience method)
         
         Args:
-            mesh: Firedrake mesh
-            material_ids: 2D numpy array (ny, nx) with integer material IDs
-            materials: List of SoilMaterial objects, indexed by material_ids
-        
-        Example:
-            # Create material map
-            mat_map = np.zeros((30, 60), dtype=int)
-            mat_map[:15, :] = 0  # Bottom: till
-            mat_map[15:, :30] = 1  # Top-left: dirt
-            mat_map[15:, 30:] = 2  # Top-right: sand
-            
-            domain = Domain.from_material_array(mesh, mat_map, [till, dirt, sand])
+            material: SoilMaterial object
+            x_min, x_max: x-coordinate bounds
+            y_min, y_max: y-coordinate bounds
+            name: Optional name for this region
         """
-        # Use first material as default
-        domain = cls(mesh, materials[0])
+        def in_rectangle(x, y):
+            return x_min <= x <= x_max and y_min <= y <= y_max
         
-        # Get mesh coordinates
-        coords = mesh.coordinates.dat.data
-        Lx = coords[:, 0].max()
-        Ly = coords[:, 1].max()
-        ny, nx = material_ids.shape
-        
-        # Create lookup function using nearest neighbor
-        def get_material_id_at_point(x, y):
-            ix = int(np.clip(x / Lx * nx, 0, nx - 1))
-            iy = int(np.clip(y / Ly * ny, 0, ny - 1))
-            return material_ids[iy, ix]
-        
-        # Add regions for each material (except default)
-        for i, material in enumerate(materials[1:], start=1):
-            domain.add_material_region(
-                material,
-                lambda x, y, mat_id=i: get_material_id_at_point(x, y) == mat_id,
-                name=f"material_{i}"
-            )
-        
-        return domain
+        self.add_material_region(material, in_rectangle, name=name or "rectangle")
+        return self
     
     # ==========================================
     # POLYGON-BASED REGION DEFINITION
@@ -175,26 +171,6 @@ class Domain:
             return inside
         
         self.add_material_region(material, point_in_polygon, name=name or "polygon")
-        return self
-    
-    # ==========================================
-    # RECTANGLE HELPER (convenience method)
-    # ==========================================
-    
-    def add_rectangle(self, material, x_min, x_max, y_min, y_max, name=None):
-        """
-        Add rectangular material region (convenience method)
-        
-        Args:
-            material: SoilMaterial object
-            x_min, x_max: x-coordinate bounds
-            y_min, y_max: y-coordinate bounds
-            name: Optional name for this region
-        """
-        def in_rectangle(x, y):
-            return x_min <= x <= x_max and y_min <= y <= y_max
-        
-        self.add_material_region(material, in_rectangle, name=name or "rectangle")
         return self
     
     # ==========================================
@@ -499,7 +475,7 @@ class Domain:
         return resistivity
 
 if __name__ == "__main__":
-    from firedrake import RectangleMesh, FunctionSpace
+    from firedrake import FunctionSpace
     import matplotlib.pyplot as plt
     from .materials import SoilMaterial
 
@@ -507,11 +483,8 @@ if __name__ == "__main__":
 
     terreau = SoilMaterial.from_curves(name="Terreau")
     
-    # Create rectangular mesh: 20m wide, 5m high
-    mesh = RectangleMesh(100, 25, 20.0, 5.0)
-    
-    # Create domain with Till as base material
-    domain = Domain.homogeneous(mesh, till)
+    # Create domain with Till as base material - mesh created internally
+    domain = Domain.homogeneous(till, Lx=20.0, Ly=5.0, nx=100, ny=25)
     
     domain.add_rectangle(
         material=terreau,
@@ -520,7 +493,7 @@ if __name__ == "__main__":
         name="green_infrastructure"
     )
     
-    V = FunctionSpace(mesh, "CG", 1)
+    V = FunctionSpace(domain.mesh, "CG", 1)
     fig = domain.visualize_materials(V, 
                                      #save_path='domain_configuration.png'
                                      )

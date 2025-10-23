@@ -3,7 +3,6 @@ Boundary condition management for Richards equation
 Single source of truth for water table configuration
 """
 from firedrake import DirichletBC, Function
-from datetime import datetime, timedelta
 
 class BoundaryConditionManager:
     """

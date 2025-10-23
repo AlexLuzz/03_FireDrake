@@ -33,15 +33,13 @@ def main():
     )
 
     # ==========================================
-    # 3. CREATE MESH WITH MATERIALS
+    # 3. CREATE DOMAIN WITH MATERIALS
     # ==========================================
     till = SoilMaterial.from_curves(name="Till")
     terreau = SoilMaterial.from_curves(name="Terreau")
 
-    mesh = RectangleMesh(80, 40, 20.0, 5.0)
-    
-    # Create domain with Till as base material
-    domain = Domain.homogeneous(mesh, till)
+    # Create domain with Till as base material - mesh created internally
+    domain = Domain.homogeneous(till, Lx=20.0, Ly=5.0, nx=80, ny=40)
     
     domain.add_rectangle(
         material=terreau,
@@ -50,7 +48,7 @@ def main():
         name="green_infrastructure"
     )
 
-    V = FunctionSpace(mesh, "CG", 1)
+    V = FunctionSpace(domain.mesh, "CG", 1)
     
     # ==========================================
     # 4. CREATE BOUNDARY CONDITION MANAGER
@@ -64,8 +62,7 @@ def main():
     # ==========================================
     # 5. CREATE MONITORING
     # ==========================================
-    probe_names = [f"LTC {i+1} (x={x:.1f}m, y={y:.1f}m)" for i, (x, y) in enumerate(config.probes_positions)]
-    probe_manager = ProbeManager(mesh, config.probes_positions, probe_names)
+    probe_manager = ProbeManager(domain.mesh)  # Uses default probe positions
 
     # Define 6 snapshot times (in seconds)
     snapshot_times = [
@@ -81,7 +78,7 @@ def main():
     # ==========================================
     # 6. CREATE SOLVER
     # ==========================================
-    solver = RichardsSolver(mesh, V, domain, rain_event, bc_manager, config)
+    solver = RichardsSolver(domain.mesh, V, domain, rain_event, bc_manager, config)
         
     # ==========================================
     # 7. RUN SIMULATION
@@ -93,7 +90,7 @@ def main():
     # ==========================================
     now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    plotter = ResultsPlotter(config, mesh)
+    plotter = ResultsPlotter(config, domain.mesh)
     plotter.plot_complete_results(
         probe_data=probe_manager.get_data(),
         snapshots=snapshot_manager.snapshots,
@@ -107,7 +104,7 @@ def main():
     from visualization import GifAnimator
     plot_gif_animation = False
     if plot_gif_animation:
-        animator = GifAnimator(snapshot_manager.snapshots, config, mesh)
+        animator = GifAnimator(snapshot_manager.snapshots, config, domain.mesh)
         animator.create_animation(
             field_name='saturation',
             filename='results/saturation_evolution.gif',

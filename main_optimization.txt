@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import numpy as np
 from datetime import datetime, timedelta
-from firedrake import FunctionSpace, RectangleMesh
+from firedrake import FunctionSpace
 
 # Import from local modules
 from physics import SoilMaterial, Domain, VanGenuchtenParams, VanGenuchtenModel
@@ -35,16 +35,17 @@ class ForwardModel:
     """
     
     def __init__(self, 
-                 mesh,
                  base_material_name: str = "Till",
                  probe_location: tuple = (5.0, 2.5),
                  observation_times: np.ndarray = None,
-                 coarse: bool = True):
+                 coarse: bool = True,
+                 Lx: float = 20.0,
+                 Ly: float = 5.0,
+                 nx: int = 40,
+                 ny: int = 20):
         """
         Parameters:
         -----------
-        mesh : Mesh
-            FireDrake mesh
         base_material_name : str
             Material to optimize parameters for
         probe_location : tuple
@@ -53,8 +54,13 @@ class ForwardModel:
             Times to extract data at (seconds)
         coarse : bool
             Use coarse mesh/timestep for speed
+        Lx, Ly : float
+            Domain dimensions
+        nx, ny : int
+            Mesh resolution
         """
-        self.mesh = mesh
+        # Store mesh parameters for creating domains
+        self.Lx, self.Ly, self.nx, self.ny = Lx, Ly, nx, ny
         self.base_material_name = base_material_name
         self.probe_location = probe_location
         self.observation_times = observation_times
@@ -93,11 +99,11 @@ class ForwardModel:
         # Create material with new parameters
         material = self._create_material(params_dict)
         
-        # Setup domain
-        domain = Domain.homogeneous(self.mesh, material)
+        # Setup domain with new material
+        domain = Domain.homogeneous(material, Lx=self.Lx, Ly=self.Ly, nx=self.nx, ny=self.ny)
         
         # Setup solver
-        V = FunctionSpace(self.mesh, "CG", 1)
+        V = FunctionSpace(domain.mesh, "CG", 1)
         
         # Simple config for calibration
         dt = 7200 if self.coarse else 3600  # 2 or 1 hour
@@ -287,17 +293,15 @@ def run_calibration(calibration_window: tuple = None,
     # ========================================
     # 4. Create mesh and forward model
     # ========================================
-    print("\nCreating mesh and forward model...")
-    
-    # Use coarse mesh for calibration
-    mesh = RectangleMesh(40, 20, 20.0, 5.0)
+    print("\nCreating forward model...")
     
     forward_model = ForwardModel(
-        mesh=mesh,
         base_material_name="Till",
         probe_location=(5.0, 2.5),
         observation_times=obs_times,
-        coarse=True
+        coarse=True,
+        # Mesh parameters
+        Lx=20.0, Ly=5.0, nx=40, ny=20
     )
     
     # ========================================

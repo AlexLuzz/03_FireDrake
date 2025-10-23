@@ -13,7 +13,7 @@ class RichardsSolver:
     Implements: Cm * ∂Hp/∂t - ∇·(kr * Ks * ∇Hp) = rain_flux
     """
 
-    def __init__(self, mesh, V, domain, rain_scenario, bc_manager, config):
+    def __init__(self, V, domain, rain_scenario, bc_manager, config):
         """
         Initialize solver
         
@@ -21,10 +21,11 @@ class RichardsSolver:
             mesh: Firedrake mesh
             V: Function space
             domain: Domain object with material properties
+            rain_scenario: RainScenario object
             bc_manager: BoundaryConditionManager
             config: SimulationConfig
         """
-        self.mesh = mesh
+        self.mesh = domain.mesh
         self.V = V
         self.domain = domain
         self.rain_scenario = rain_scenario
@@ -234,18 +235,15 @@ class RichardsSolver:
         # Update for next time step
         self.p_n.assign(self.p_new)
     
-    def run(self, probe_manager=None, snapshot_manager=None, print_diagnostics=False):
+    def run(self, probe_manager=None, snapshot_manager=None):
         """
         Run full simulation
         
         Args:
             probe_manager: ProbeManager for time series (optional)
             snapshot_manager: SnapshotManager for spatial data (optional)
-            print_diagnostics: Print detailed diagnostics every hour (optional)
         """
         print("Starting simulation...")
-        print(f"Domain: {self.config.Lx}m x {self.config.Ly}m")
-        print(f"Mesh: {self.config.nx} x {self.config.ny} elements")
         print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
         
         probe_manager.record_initial(self.p_n)
@@ -275,12 +273,6 @@ class RichardsSolver:
                 filled_length = int(bar_length * progress)
                 bar = '█' * filled_length + '░' * (bar_length - filled_length)
                 print(f"\rProgress: [{bar}] {progress*100:.1f}% | Time: {t/3600:.1f}h / {self.config.t_end/3600:.1f}h", end='', flush=True)
-                
-                # Detailed diagnostics if requested
-                if print_diagnostics:
-                    print()  # New line before diagnostics
-                    self.print_diagnostics(t)
-                    print()
         
         print("\n\nSimulation complete!")
         
@@ -304,43 +296,3 @@ class RichardsSolver:
             print(f"  Total snapshots recorded: {len(snapshot_manager.snapshots)}")
             for t in sorted(snapshot_manager.snapshots.keys()):
                 print(f"    t = {t/3600:.2f}h")
-
-    
-    def compute_total_water_content(self):
-        """
-        Compute total water in domain (for mass balance checks)
-        
-        Returns:
-            Total water content (m³)
-        """
-        coords = self.mesh.coordinates.dat.data
-        p_vals = self.p_new.dat.data[:]
-        
-        total_theta = 0.0
-        for i, (x, y) in enumerate(coords):
-            Hp = p_vals[i]
-            material = self.domain.get_material_at_point(x, y)
-            theta = material.water_content(Hp)
-            total_theta += theta
-        
-        # Approximate volume per node
-        dx = self.config.dx
-        dy = self.config.dy
-        volume_per_node = dx * dy
-        
-        return total_theta * volume_per_node
-    
-    def print_diagnostics(self, t: float):
-        """Print diagnostic information"""
-        p_vals = self.p_new.dat.data[:]
-        print(f"  Pressure range: [{p_vals.min():.4f}, {p_vals.max():.4f}] m")
-        print(f"  Mean pressure: {p_vals.mean():.4f} m")
-        
-        # Count saturated nodes
-        saturated = np.sum(p_vals > 0)
-        total = len(p_vals)
-        print(f"  Saturated nodes: {saturated}/{total} ({100*saturated/total:.1f}%)")
-        
-        # Total water
-        total_water = self.compute_total_water_content()
-        print(f"  Total water: {total_water:.3f} m³")

@@ -15,12 +15,6 @@ class SimulationConfig:
     name: str = "Richards_Rain_Event"
     description: str = "Rain event simulation"
     
-    # Domain geometry
-    Lx: float = 20.0  # Domain length (m)
-    Ly: float = 5.0   # Domain height (m)
-    nx: int = 80      # Number of elements in x
-    ny: int = 40      # Number of elements in y
-    
     # Time discretization (can use EITHER seconds OR datetime/timedelta)
     # Option 1: Traditional seconds-based (backward compatible)
     dt: float = 300.0            # Time step (seconds)
@@ -35,21 +29,6 @@ class SimulationConfig:
     # Computed fields
     num_steps: int = field(init=False)
     time_converter: Optional[object] = field(init=False, default=None)
-    
-    # Physical constants
-    g: float = 9.81             # Gravity (m/s^2)
-    
-    # Numerical parameters
-    epsilon: float = 0.05     # Smoothing parameter near water table (m)
-    kr_min: float = 0.03      # Minimum relative permeability
-    Ss: float = 1e-2          # Specific storage coefficient (1/m)
-    
-    # Monitoring points
-    probes_positions: List[float] = field(default_factory=lambda: [
-                                                                    [8.0, 1.0],
-                                                                    [10.0, 1.0],
-                                                                    [12.5, 1.0]
-                                                                ])
     
     # Output settings
     output_dir: Path = Path("./results")

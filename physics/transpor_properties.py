@@ -5,7 +5,6 @@ Manages chemical-specific transport parameters
 """
 from dataclasses import dataclass
 from typing import Optional
-import numpy as np
 
 # ==========================================
 # CONTAMINANT DATABASE
