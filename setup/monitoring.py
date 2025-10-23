@@ -22,8 +22,8 @@ class ProbeManager:
         self.times = []
         
         # Fixed: Use 1% of domain width as tolerance (more robust)
-        coords = mesh.coordinates.dat.data
-        domain_width = coords[:, 0].max() - coords[:, 0].min()
+        self.coords = mesh.coordinates.dat.data
+        domain_width = self.coords[:, 0].max() - self.coords[:, 0].min()
         self.x_tol = domain_width * 0.01  # 1% of domain width
         
         print(f"ProbeManager initialized with x_tol = {self.x_tol:.4f}m")
@@ -31,19 +31,17 @@ class ProbeManager:
 
     def find_water_table_at_probe_pos(self, pressure_field, probe_pos):
         """Find water table elevation (where p=0) at given probe position"""
-        coords = self.mesh.coordinates.dat.data
         p_vals = pressure_field.dat.data[:]
-
-        x_pos, y_pos = probe_pos
+        x_pos, _ = probe_pos
         
         # Find all nodes near this x position
-        mask = np.abs(coords[:, 0] - x_pos) < self.x_tol
+        mask = np.abs(self.coords[:, 0] - x_pos) < self.x_tol
         if not np.any(mask):
             print(f"⚠️  No nodes found near x={x_pos:.2f}m (tol={self.x_tol:.4f}m)")
             return None
         
         # Get y-coordinates and pressures at this x
-        y_coords = coords[mask, 1]  # Column 1 = y coordinates
+        y_coords = self.coords[mask, 1]  # Column 1 = y coordinates
         p_at_x = p_vals[mask]
         
         # Sort by y (bottom to top)
@@ -113,15 +111,14 @@ class SnapshotManager:
     
     def __init__(self, snapshot_times, domain):
         self.snapshot_times = list(snapshot_times)
-        self.requested_times = list(snapshot_times)
         self.snapshots = {}
         self.domain = domain
     
     def should_record(self, t, dt):
         """Check if current time is close to a snapshot time"""
-        for req_time in self.requested_times[:]:
+        for req_time in self.snapshot_times[:]:
             if abs(t - req_time) < dt * 0.6:
-                self.requested_times.remove(req_time)
+                self.snapshot_times.remove(req_time)
                 return True
         return False
     

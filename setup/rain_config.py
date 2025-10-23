@@ -1,102 +1,76 @@
 # physics/rain_config.py
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
-from datetime import datetime
-import numpy as np
-import csv
+from typing import List, Optional
 
 @dataclass
 class RainZone:
-    """
-    Define a spatial zone where rain is applied
-    """
+    """Define a spatial zone where rain is applied"""
     x_min: float  # Start of zone (m)
     x_max: float  # End of zone (m)
     multiplier: float = 1.0  # Intensity multiplier relative to base intensity
     name: str = "rain_zone"  # Optional name for zone
-    
-    def contains_x(self, x: float) -> bool:
-        """Check if x coordinate is in this zone"""
-        return self.x_min <= x <= self.x_max
 
 
 @dataclass
 class RainEvent:
-    """
-    Define a rain event with timing and intensity
-    """
+    """Define a rain event with timing and intensity"""
     start_time: float  # Start time (hours)
     end_time: float    # End time (hours)
     intensity: float   # Rain intensity (mm/hour)
-    zones: List[RainZone] = None  # Spatial zones (None = entire domain)
+    zones: Optional[List[RainZone]] = None  # Spatial zones (None = entire domain)
     name: str = "rain_event"  # Optional name for event
-    
-    def __post_init__(self):
-        if self.zones is None:
-            # Default: apply to entire domain
-            self.zones = [RainZone(x_min=-np.inf, x_max=np.inf, multiplier=1.0, name="full_domain")]
-    
-    @property
-    def duration_hours(self) -> float:
-        """Duration in hours"""
-        return self.end_time - self.start_time
-    
-    @property
-    def total_depth_mm(self) -> float:
-        """Total rain depth in mm"""
-        return self.intensity * self.duration_hours
-    
-    def is_active(self, t_hours: float) -> bool:
-        """Check if event is active at given time"""
-        return self.start_time <= t_hours <= self.end_time
-    
-    def get_flux_at_x(self, x: float, t_hours: float) -> float:
-        """
-        Get rain flux at position x and time t
-        
-        Returns:
-            Flux in m/s (negative = into domain)
-        """
-        if not self.is_active(t_hours):
-            return 0.0
-        
-        # Check which zone x is in
-        for zone in self.zones:
-            if zone.contains_x(x):
-                # Convert mm/hour to m/s: mm/hour * (1m/1000mm) * (1hour/3600s)
-                flux_m_s = self.intensity * zone.multiplier / 3600000.0
-                return -flux_m_s  # Negative = into domain
-        
-        return 0.0
 
 
 class RainScenario:
-    """
-    Manage multiple rain events over a simulation
-    """
+    """Manage multiple rain events over a simulation"""
     
     def __init__(self, events: List[RainEvent]):
-        """
-        Initialize rain scenario
-        
-        Args:
-            events: List of RainEvent objects
-        """
         self.events = sorted(events, key=lambda e: e.start_time)
     
     @classmethod
     def single_event(cls, start_hours: float, end_hours: float, 
-                     intensity_mm_hr: float, zones: List[RainZone] = None):
-        """
-        Create scenario with single rain event
-        
-        Example:
-            # Uniform 20mm/hour rain from 3h to 5h
-            scenario = RainScenario.single_event(3.0, 5.0, 20.0)
-        """
+                     intensity_mm_hr: float, zones: Optional[List[RainZone]] = None):
+        """Create scenario with single rain event"""
         event = RainEvent(start_hours, end_hours, intensity_mm_hr, zones)
         return cls([event])
     
+    def get_flux_expression(self, t_hours: float, mesh):
+        """
+        Get UFL expression for spatially-varying rain flux at given time
+        
+        Returns:
+            UFL expression for rain flux (m/s, negative = into domain)
+        """
+        from firedrake import SpatialCoordinate, Constant, conditional, And
+        
+        # Remove finished events
+        while self.events and t_hours > self.events[0].end_time:
+            self.events.pop(0)
+        
+        # Check if we have an active event
+        if self.events and self.events[0].start_time <= t_hours <= self.events[0].end_time:
+            event = self.events[0]
+            
+            # If no zones specified, apply uniformly everywhere
+            if event.zones is None:
+                flux = event.intensity / 3600000.0  # mm/hr to m/s
+                return Constant(-flux)
+            
+            # Build UFL expression for zones
+            coords = SpatialCoordinate(mesh)
+            x = coords[0]
+            flux_expr = Constant(0.0)
+            for zone in event.zones:
+                zone_flux = event.intensity * zone.multiplier / 3600000.0
+                flux_expr = conditional(
+                    And(x >= zone.x_min, x <= zone.x_max),
+                    Constant(-zone_flux),
+                    flux_expr
+                )
+            return flux_expr
+        
+        return Constant(0.0)
+        
     @classmethod
     def from_csv(cls, csv_path: str, 
              start_from: float = 0.0,
@@ -397,47 +371,7 @@ class RainScenario:
         print(f"  Created {len(events)} rain event(s)")
         
         return cls(events)
-
     
-    def get_flux_at_x(self, x: float, t_hours: float) -> float:
-        """
-        Get total rain flux at position x and time t
-        
-        Returns:
-            Flux in m/s (negative = into domain)
-        """
-        total_flux = 0.0
-        for event in self.events:
-            total_flux += event.get_flux_at_x(x, t_hours)
-        return total_flux
-    
-    def print_summary(self):
-        """Print summary of rain events"""
-        print("Rain Scenario Summary:")
-        print(f"  Total events: {len(self.events)}")
-        
-        total_duration = sum(e.duration_hours for e in self.events)
-        avg_intensity = np.mean([e.intensity for e in self.events])
-        total_depth = sum(e.total_depth_mm for e in self.events)
-        
-        print(f"  Total rain duration: {total_duration:.1f} hours")
-        print(f"  Average intensity: {avg_intensity:.1f} mm/hour")
-        print(f"  Total rain depth: {total_depth:.1f} mm")
-        print()
-        
-        for i, event in enumerate(self.events, 1):
-            print(f"  Event {i}: {event.name}")
-            print(f"    Time: {event.start_time:.1f}h to {event.end_time:.1f}h ({event.duration_hours:.1f}h)")
-            print(f"    Intensity: {event.intensity:.1f} mm/hour")
-            print(f"    Total depth: {event.total_depth_mm:.1f} mm")
-            print(f"    Zones: {len(event.zones)}")
-            for zone in event.zones:
-                if zone.multiplier != 1.0:
-                    print(f"      - {zone.name}: x∈[{zone.x_min:.1f}, {zone.x_max:.1f}]m, "
-                          f"multiplier={zone.multiplier:.1f}x")
-            print()
-
-
 # ==========================================
 # EXAMPLES
 # ==========================================

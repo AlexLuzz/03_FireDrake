@@ -65,40 +65,6 @@ class RichardsSolver:
     def _update_coefficients(self):
         """Update Cm and kr based on current pressure"""
         self.Cm_n, self.kr_n = self.domain.compute_coefficient_fields(self.p_n)
-    
-    def get_rain_flux_expression(self, t: float):
-        """
-        Get spatially-varying rain flux expression for current time
-        Rain is applied as Neumann BC (flux) on top boundary
-        
-        Args:
-            t: Current time (seconds)
-        
-        Returns:
-            UFL expression for rain flux (m/s, negative = into domain)
-        """        
-        t_hours = t / 3600.0
-        coords = SpatialCoordinate(self.mesh)
-        x = coords[0]
-        
-        # Build piecewise expression for all zones
-        flux_expr = Constant(0.0)
-        
-        for event in self.rain_scenario.events:
-            if event.is_active(t_hours):
-                # Event is active - check each zone
-                for zone in event.zones:
-                    # Calculate flux for this zone
-                    zone_flux = event.intensity * zone.multiplier / 3600000.0  # mm/hr to m/s
-                    
-                    # Add contribution if x is in zone
-                    flux_expr = conditional(
-                        And(x >= zone.x_min, x <= zone.x_max),
-                        Constant(-zone_flux),  # Negative = into domain
-                        flux_expr  # Keep previous value if not in zone
-                    )
-        
-        return flux_expr
 
     def solve_timestep(self, t: float):
         """
@@ -115,7 +81,7 @@ class RichardsSolver:
         bcs = self.bc_manager.get_dirichlet_bcs(t)
         
         # Get rain flux expression
-        rain_flux = self.get_rain_flux_expression(t)
+        rain_flux = self.rain_scenario.get_flux_expression(t / 3600.0, self.mesh)
         
         # Define variational problem
         p = TrialFunction(self.V)  # Unknown pressure head (to solve for)

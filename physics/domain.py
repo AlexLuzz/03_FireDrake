@@ -10,8 +10,8 @@ class Domain:
     Manages spatially variable soil properties
     Provides smart constructors for common geometries
     """
-    
-    def __init__(self, mesh, default_material, Lx=None, Ly=None, nx=None, ny=None, waxman_smits_model=None):
+
+    def __init__(self, mesh, default_material, Lx=20.0, Ly=5.0, nx=80, ny=40, waxman_smits_model=None):
         """
         Initialize domain with default material
         
