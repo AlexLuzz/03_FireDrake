@@ -1,339 +1,259 @@
 """
-Source Terms for Flow and Transport
-Works with your existing RainScenario from rain_config.py
+Compact spatio-temporal source/sink manager for FEM simulations
+(Handles rainfall, chloride, etc.)
 """
-from abc import ABC, abstractmethod
+
+from dataclasses import dataclass
+from typing import List, Optional, Callable
+from datetime import datetime
+import pandas as pd
 from firedrake import Constant, SpatialCoordinate, conditional, And
-import numpy as np
 
-# ==========================================
-# ABSTRACT BASE CLASS
-# ==========================================
-
-class SourceTerm(ABC):
-    """Abstract base for all source/sink terms"""
-    
-    @abstractmethod
-    def get_ufl_expression(self, t: float, mesh):
-        """
-        Get UFL expression for use in weak forms
-        
-        Parameters:
-        -----------
-        t : float
-            Current time (seconds)
-        mesh : firedrake.Mesh
-            Mesh object
-        
-        Returns:
-        --------
-        UFL expression for integration (dx or ds)
-        """
-        pass
-    
-    def evaluate_at_point(self, t: float, x: float = None, y: float = None):
-        """
-        Evaluate source at specific point (for diagnostics)
-        
-        Parameters:
-        -----------
-        t : float (seconds)
-        x, y : float (meters)
-        
-        Returns:
-        --------
-        float: source value
-        """
-        # Default implementation - override if needed
-        return 0.0
+from tools.csv_loader import CSVLoader
+from tools.time_converter import TimeConverter
 
 
-# ==========================================
-# HYDRAULIC FLOW SOURCES
-# ==========================================
+# ============================================================
+# Core Data Structures
+# ============================================================
 
-class HydraulicSource(SourceTerm):
-    """
-    Hydraulic source using your RainScenario from rain_config.py
-    
-    This wraps your existing RainScenario to work with the SourceTerm interface
-    """
-    
-    def __init__(self, rain_scenario):
-        """
-        Parameters:
-        -----------
-        rain_scenario : RainScenario (from rain_config.py)
-            Your existing rain scenario object
-        """
-        self.rain_scenario = rain_scenario
-    
-    def get_ufl_expression(self, t: float, mesh):
-        """
-        Build UFL expression for rainfall at time t
-        Applied as Neumann BC on top boundary (ds(4))
-        
-        Returns:
-        --------
-        flux : UFL expression (m/s, negative = into domain)
-        """
-        t_hours = t / 3600.0
-        coords = SpatialCoordinate(mesh)
+@dataclass
+class Zone:
+    name: str
+    x_min: float
+    x_max: float
+    y_min: Optional[float] = None
+    y_max: Optional[float] = None
+    multiplier: float = 1.0
+
+    def contains(self, x, y=None):
+        in_x = self.x_min <= x <= self.x_max
+        if self.y_min is not None and y is not None:
+            return in_x and self.y_min <= y <= self.y_max
+        return in_x
+
+    def ufl_condition(self, coords):
         x = coords[0]
-        
-        # Build expression from all active events
-        flux_expr = Constant(0.0)
-        
-        for event in self.rain_scenario.events:
-            if event.is_active(t_hours):
-                for zone in event.zones:
-                    # Calculate flux for this zone (mm/hr → m/s)
-                    zone_flux = event.intensity * zone.multiplier / 3600000.0
-                    
-                    # Add contribution if x is in zone
-                    flux_expr = conditional(
-                        And(x >= zone.x_min, x <= zone.x_max),
-                        Constant(-zone_flux),  # Negative = into domain
-                        flux_expr
-                    )
-        
-        return flux_expr
-    
-    def evaluate_at_point(self, t: float, x: float = None, y: float = None):
-        """Evaluate rain flux at specific location"""
-        t_hours = t / 3600.0
-        return self.rain_scenario.get_flux_at_x(x if x is not None else 0.0, t_hours)
-
-
-# ==========================================
-# CONTAMINANT TRANSPORT SOURCES
-# ==========================================
-
-class ContaminantSource(SourceTerm):
-    """
-    Generic contaminant source term
-    Can represent: surface input, degradation, root uptake, etc.
-    """
-    
-    def __init__(self, rate: float, 
-                 x_min=None, x_max=None, 
-                 y_min=None, y_max=None,
-                 time_function=None):
-        """
-        Parameters:
-        -----------
-        rate : float
-            Base source rate (mol/m³/s or mg/L/s)
-            Positive = source, Negative = sink
-        x_min, x_max : float (optional)
-            Spatial extent in x (None = all x)
-        y_min, y_max : float (optional)
-            Spatial extent in y (None = all y)
-        time_function : callable(t_seconds) -> float (optional)
-            Time-varying multiplier (default = constant)
-        """
-        self.rate = rate
-        self.x_min = x_min
-        self.x_max = x_max
-        self.y_min = y_min
-        self.y_max = y_max
-        self.time_function = time_function or (lambda t: 1.0)
-    
-    def get_ufl_expression(self, t: float, mesh):
-        """Build UFL expression for volume source term"""
-        time_factor = self.time_function(t)
-        
-        # Simple case: uniform in space
-        if self.x_min is None and self.y_min is None:
-            return Constant(self.rate * time_factor)
-        
-        # Spatially variable case
-        coords = SpatialCoordinate(mesh)
-        x, y = coords[0], coords[1]
-        
-        # Build spatial condition
-        conditions = []
-        if self.x_min is not None:
-            conditions.append(And(x >= self.x_min, x <= self.x_max))
+        cond = And(x >= self.x_min, x <= self.x_max)
         if self.y_min is not None:
-            conditions.append(And(y >= self.y_min, y <= self.y_max))
-        
-        if len(conditions) == 1:
-            condition = conditions[0]
-        else:
-            condition = And(*conditions)
-        
-        return conditional(
-            condition,
-            Constant(self.rate * time_factor),
-            Constant(0.0)
-        )
-    
-    def evaluate_at_point(self, t: float, x: float = None, y: float = None):
-        """Evaluate at specific point"""
-        time_factor = self.time_function(t)
-        
-        # Check spatial bounds
-        if x is not None and self.x_min is not None:
-            if not (self.x_min <= x <= self.x_max):
-                return 0.0
-        if y is not None and self.y_min is not None:
-            if not (self.y_min <= y <= self.y_max):
-                return 0.0
-        
-        return self.rate * time_factor
+            y = coords[1]
+            cond = And(cond, And(y >= self.y_min, y <= self.y_max))
+        return cond
 
 
-class ChlorideFromRain(SourceTerm):
-    """
-    Chloride input from rainfall
-    Couples with HydraulicSource (rain flux × chloride concentration)
-    
-    Use this for background chloride in precipitation
-    """
-    
-    def __init__(self, hydraulic_source: HydraulicSource, 
-                 rain_chloride_concentration: float):
-        """
-        Parameters:
-        -----------
-        hydraulic_source : HydraulicSource
-            The rain source (for timing and intensity)
-        rain_chloride_concentration : float
-            Cl⁻ concentration in rainwater (mg/L)
-            Montreal typical: 0.1-0.5 mg/L
-            Near coast or winter: up to 2-5 mg/L
-        """
-        self.hydraulic = hydraulic_source
-        self.c_rain = rain_chloride_concentration
-    
-    def get_ufl_expression(self, t: float, mesh):
-        """
-        Chloride mass flux = rain flux × concentration
-        Applied on top boundary (ds(4))
-        """
-        rain_flux = self.hydraulic.get_ufl_expression(t, mesh)
-        # Make positive (source) and convert to mass flux
-        # rain_flux is in m/s, multiply by concentration (mg/L = g/m³)
-        # Result in mg/m²/s or g/m²/s depending on units
-        return -rain_flux * Constant(self.c_rain)
-    
-    def evaluate_at_point(self, t: float, x: float = None, y: float = None):
-        rain_flux = abs(self.hydraulic.evaluate_at_point(t, x, y))
-        return rain_flux * self.c_rain
+@dataclass
+class Event:
+    name: str
+    start: float      # seconds
+    end: float        # seconds
+    rate: float
+    zones: List[Zone]
+    profile: Optional[Callable[[float], float]] = None
+    start_dt: Optional[datetime] = None
+    end_dt: Optional[datetime] = None
+
+    def is_active(self, t: float) -> bool:
+        return self.start <= t < self.end
+
+    def get_rate(self, t: float) -> float:
+        if not self.is_active(t):
+            return 0.0
+        if self.profile:
+            τ = (t - self.start) / (self.end - self.start)
+            return self.rate * self.profile(τ)
+        return self.rate
 
 
-class RoadSaltSource(ContaminantSource):
-    """
-    De-icing salt application (episodic chloride input)
-    Designed for Montreal winter road maintenance scenarios
-    """
-    
-    def __init__(self, 
-                 road_x_min: float, 
-                 road_x_max: float,
-                 application_rate_g_m2: float,
-                 application_times_hours: list,
-                 dissolution_time_hours: float = 2.0):
-        """
-        Parameters:
-        -----------
-        road_x_min, road_x_max : float
-            Road surface location (m)
-        application_rate_g_m2 : float
-            Salt application rate (g NaCl/m² per event)
-            Montreal typical: 50-300 g/m² per application
-        application_times_hours : list of float
-            Times of salt applications (hours from simulation start)
-        dissolution_time_hours : float
-            How long salt takes to dissolve and mobilize (hours)
-        
-        Example:
-        --------
-        # Road at x=10-12m, three salt applications
-        salt = RoadSaltSource(
-            road_x_min=10.0,
-            road_x_max=12.0,
-            application_rate_g_m2=200.0,  # 200 g/m²
-            application_times_hours=[6, 18, 30],  # Morning, evening, next morning
-            dissolution_time_hours=2.0
-        )
-        """
-        self.road_x_min = road_x_min
-        self.road_x_max = road_x_max
-        self.app_rate = application_rate_g_m2  # g NaCl/m²
-        self.app_times = application_times_hours
-        self.dissolution_time = dissolution_time_hours * 3600  # Convert to seconds
-        
-        # NaCl → Na⁺ + Cl⁻
-        # Molecular weights: NaCl=58.44, Cl=35.45, Na=22.99
-        # 1 g NaCl → 0.607 g Cl⁻
-        self.cl_fraction = 35.45 / 58.44  # 0.607
-        
-    def get_ufl_expression(self, t: float, mesh):
-        """Build UFL expression for salt dissolution"""
-        # Check if any application is currently active
-        source_rate = 0.0
-        for t_app_hr in self.app_times:
-            t_app_sec = t_app_hr * 3600
-            if t_app_sec <= t < t_app_sec + self.dissolution_time:
-                # Convert g/m² to flux (mg/L/s or mol/m³/s)
-                # g NaCl/m² → g Cl/m² → mg Cl/m² → averaged over dissolution time
-                cl_mass = self.app_rate * self.cl_fraction * 1000  # mg Cl/m²
-                source_rate = cl_mass / self.dissolution_time  # mg/m²/s
-                break
-        
-        if source_rate == 0.0:
-            return Constant(0.0)
-        
-        # Apply only to road surface
+# ============================================================
+# SourceScenario: manages zones + events
+# ============================================================
+
+class SourceScenario:
+    """Manages spatial–temporal source/sink distributions."""
+
+    _units = {"s": 1, "min": 60, "h": 3600, "d": 86400}
+
+    def __init__(self, time_unit="h", rate_conv=1.0):
+        self.zones: List[Zone] = []
+        self.events: List[Event] = []
+        self.time_factor = self._units.get(time_unit, 3600)
+        self.rate_conv = rate_conv  # e.g., mm/h → m/s
+
+    # ---------------- Zones ----------------
+    def add_zone(self, name, x_min, x_max, y_min=None, y_max=None, multiplier=1.0):
+        zone = Zone(name, x_min, x_max, y_min, y_max, multiplier)
+        self.zones.append(zone)
+        return zone
+
+    def get_zone(self, name) -> Optional[Zone]:
+        return next((z for z in self.zones if z.name == name), None)
+
+    # ---------------- Events ----------------
+    def add_event(self, name, start, end, rate, zones, profile=None,
+                  start_dt=None, end_dt=None):
+        if not isinstance(zones, list):
+            zones = [zones]
+        zone_objs = [self.get_zone(z) if isinstance(z, str) else z for z in zones]
+        e = Event(name, start * self.time_factor, end * self.time_factor,
+                  rate, zone_objs, profile, start_dt, end_dt)
+        self.events.append(e)
+        return e
+
+    # ---------------- Evaluation ----------------
+    def get_flux(self, x, y, t):
+        """Numeric flux at (x, y, t)."""
+        total = 0.0
+        for e in self.events:
+            if not e.is_active(t):
+                continue
+            rate = e.get_rate(t) * self.rate_conv
+            total += sum(rate * z.multiplier for z in e.zones if z.contains(x, y))
+        return total
+
+    def get_flux_expression(self, mesh, t):
+        """UFL flux expression at time t."""
         coords = SpatialCoordinate(mesh)
-        x = coords[0]
-        return conditional(
-            And(x >= self.road_x_min, x <= self.road_x_max),
-            Constant(source_rate),
-            Constant(0.0)
-        )
-    
-    def evaluate_at_point(self, t: float, x: float = None, y: float = None):
-        """Evaluate at point"""
-        # Check active application
-        for t_app_hr in self.app_times:
-            t_app_sec = t_app_hr * 3600
-            if t_app_sec <= t < t_app_sec + self.dissolution_time:
-                if x is None or (self.road_x_min <= x <= self.road_x_max):
-                    cl_mass = self.app_rate * self.cl_fraction * 1000
-                    return cl_mass / self.dissolution_time
-        return 0.0
+        flux = Constant(0.0)
+        for e in self.events:
+            if not e.is_active(t):
+                continue
+            rate = e.get_rate(t) * self.rate_conv
+            for z in e.zones:
+                flux = conditional(z.ufl_condition(coords),
+                                   Constant(-rate * z.multiplier),
+                                   flux)
+        return flux
 
 
-class CompositeSource(SourceTerm):
-    """
-    Combine multiple sources (superposition principle)
-    Example: Background chloride from rain + episodic road salt
-    """
+# ============================================================
+# Helper Scenarios
+# ============================================================
+
+def rainfall_scenario(domain_length=None, zones=None, csv_path=None,
+                      time_col="Date", rain_col="Pluie tot. (mm)", events=None,
+                      from_date=None, to_date=None,
+                      time_unit="day", rain_unit="mm/day"):
+    """Create rainfall scenario from events or CSV."""
+    conv = 1 / 3600000.0  # mm/h → m/s
+    sc = SourceScenario(time_unit, rate_conv=conv)
+
+    # Zones
+    if zones:
+        for z in zones:
+            sc.add_zone(**z)
+    elif domain_length:
+        sc.add_zone("domain", 0, domain_length)
+
+    if csv_path:
+        loader = CSVLoader(csv_path, time_col)
+        df = loader.df
+        if isinstance(df.index, pd.DatetimeIndex):
+            if from_date: df = df[df.index >= from_date]
+            if to_date: df = df[df.index <= to_date]
+            times = df.index.to_pydatetime()
+            time_converter = TimeConverter(times[0])
+            numeric_times = [time_converter.to_seconds(t) for t in times]
+            
+            # Get intensities from filtered dataframe (handle numeric or string with comma decimal)
+            raw_vals = df[rain_col]
+            # Ensure we operate on string replacement only when necessary
+            if raw_vals.dtype == object or raw_vals.dtype == "string":
+                cleaned = raw_vals.astype(str).str.replace(',', '.', regex=False)
+                intensities = pd.to_numeric(cleaned, errors='coerce').values
+            else:
+                intensities = pd.to_numeric(raw_vals, errors='coerce').values
+        else:
+            numeric_times = loader.get_numeric(time_col)
+            intensities = loader.get_numeric(rain_col)
+            time_converter = None
+
+        if "day" in rain_unit.lower():
+            intensities = intensities / 24.0
+
+        _create_events_from_series(sc, numeric_times, intensities, time_converter)
+    elif events:
+        for e in events:
+            sc.add_event(e.get("name", "event"),
+                         e["start"], e["end"], e["rate"],
+                         [z.name for z in sc.zones])
+
+    return sc
+
+
+def chloride_scenario(road_x_min, road_x_max, applications,
+                      time_unit="h", rate_unit="kg/m2/h"):
+    """Create chloride application scenario."""
+    conv = 1.0 if rate_unit == "kg/m2/h" else 1.0
+    sc = SourceScenario(time_unit, rate_conv=conv)
+    sc.add_zone("road", road_x_min, road_x_max)
+    for i, app in enumerate(applications):
+        sc.add_event(f"chloride_{i}",
+                     app["time"], app["time"] + app["duration"],
+                     app["rate"], "road")
+    return sc
+
+
+# ============================================================
+# Internal Helpers
+# ============================================================
+
+def _create_events_from_series(sc: SourceScenario, times, rates, time_converter=None):
+    """Convert time series into constant-rate events."""
+    if len(times) == 0 or len(rates) == 0:
+        print("⚠️  Empty times or rates array in _create_events_from_series")
+        return
     
-    def __init__(self, sources: list):
-        """
-        Parameters:
-        -----------
-        sources : list of SourceTerm
-            Individual sources to combine
-        """
-        self.sources = sources
+    if len(times) != len(rates):
+        print(f"⚠️  Mismatch: times has {len(times)} elements, rates has {len(rates)} elements")
+        return
     
-    def get_ufl_expression(self, t: float, mesh):
-        """Sum all source contributions"""
-        if not self.sources:
-            return Constant(0.0)
+    in_event = False
+    start_i = 0
+    current = 0
+    
+    for i, rate in enumerate(rates):
+        if rate > 0 and not in_event:
+            in_event, start_i, current = True, i, rate
+        elif in_event and (rate <= 0 or abs(rate - current) > 1e-6):
+            # End current event
+            if i < len(times) and start_i < len(times):
+                _add_event(sc, times[start_i], times[i], current, time_converter)
+            in_event = False
+            # Start new event if rate > 0
+            if rate > 0:
+                in_event, start_i, current = True, i, rate
+    
+    # Handle event that extends to the end
+    if in_event and start_i < len(times):
+        # For the last event, we need an end time. 
+        # If we have multiple points, use the last time, otherwise estimate
+        if len(times) > 1:
+            end_time = times[-1]
+        else:
+            # Single time point - estimate a duration (e.g., 1 day)
+            if time_converter:
+                end_time = times[0] + 86400  # Add 1 day in seconds
+            else:
+                end_time = times[0] + 1.0  # Add 1 day in days
         
-        expr = self.sources[0].get_ufl_expression(t, mesh)
-        for source in self.sources[1:]:
-            expr = expr + source.get_ufl_expression(t, mesh)
-        
-        return expr
-    
-    def evaluate_at_point(self, t: float, x: float = None, y: float = None):
-        """Sum all sources at point"""
-        return sum(s.evaluate_at_point(t, x, y) for s in self.sources)
+        _add_event(sc, times[start_i], end_time, current, time_converter)
 
+
+def _add_event(sc, start, end, rate, time_converter=None):
+    """Helper: add one event."""
+    if time_converter:
+        # start and end are already in seconds (converted from datetime)
+        start_s, end_s = start, end
+        # Convert back to datetime for metadata
+        start_dt = time_converter.to_datetime(start)
+        end_dt = time_converter.to_datetime(end)
+    else:
+        # start and end are in days, convert to seconds
+        start_s, end_s = start * 86400, end * 86400
+        start_dt, end_dt = None, None
+
+    sc.add_event(f"event_{len(sc.events)}",
+                 start_s / sc.time_factor,
+                 end_s / sc.time_factor,
+                 rate, [z.name for z in sc.zones],
+                 start_dt=start_dt, end_dt=end_dt)

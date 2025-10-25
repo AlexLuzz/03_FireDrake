@@ -59,7 +59,7 @@ class SimulationConfig:
     def __post_init__(self):
         """Initialize computed fields and handle datetime conversion"""
         # Import here to avoid circular dependency
-        from tools.time_utils import TimeConverter
+        from tools.time_converter import TimeConverter
         
         # If datetime parameters provided, convert to seconds
         if self.start_datetime is not None:

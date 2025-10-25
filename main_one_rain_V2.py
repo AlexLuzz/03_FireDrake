@@ -5,6 +5,7 @@ from solver import *
 from visualization import *
 from datetime import datetime, timedelta
 from setup import *
+from setup.source_term import rainfall_scenario
 
 def main():
     """Main simulation function"""
@@ -14,26 +15,28 @@ def main():
     # ==========================================
     config = SimulationConfig(
         name="Datetime_Duration",
-        start_datetime=datetime(2024, 5, 1), # YYYY, MM, DD
-        end_datetime=datetime(2024, 5, 15),
-        dt_td=timedelta(hours=6)
+        start_datetime=datetime(2024, 4, 1), # YYYY, MM, DD
+        end_datetime=datetime(2024, 6, 30),
+        dt_td=timedelta(hours=4)
     )
     # ==========================================
     # 2. DEFINE RAIN SCENARIO
     # ==========================================
+    # Define zones with different multipliers
     rain_zones = [
-        RainZone(x_min=0.0, x_max=8.0, multiplier=1.0, name="grass"),
-        RainZone(x_min=9.0, x_max=11.0, multiplier=6.0, name="green_infrastructure"),
+        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 'multiplier': 1.0},
+        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': 6.0},
     ]
-
-    rain_scenario = RainScenario.from_datetime_csv(
-        config.data_input_dir / "BB_METEO.csv",
-        time_converter=config.time_converter,
-        zones=rain_zones,
-        start_datetime=config.start_datetime,
-        end_datetime=config.end_datetime
+    
+    # Create rainfall scenario from CSV
+    rain_source = rainfall_scenario(
+        csv_path=config.data_input_dir / "BB_METEO.csv",
+        from_date=config.start_datetime,
+        to_date=config.end_datetime,
+        rain_unit="mm/day",
+        zones=rain_zones
     )
-
+    
     # ==========================================
     # 3. CREATE DOMAIN WITH MATERIALS
     # ==========================================
@@ -88,7 +91,7 @@ def main():
     # ==========================================
     # 6. CREATE SOLVER
     # ==========================================
-    solver = RichardsSolver(V, domain, rain_scenario, bc_manager, config)
+    solver = RichardsSolver(V, domain, rain_source, bc_manager, config)
         
     # ==========================================
     # 7. RUN SIMULATION
@@ -100,18 +103,24 @@ def main():
     # ==========================================
     now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    plotter = ResultsPlotter(config, domain.mesh)
+    plotter = ResultsPlotter(config, domain.mesh, probe_manager, rain_source, domain,
+                             #snapshot_manager
+                             )
+    
+    # Example: Individual piezometer offsets (if different heights needed)
+    measured_offsets = {
+         "LTC 101": 0.60,  # 60cm offset for LTC 101
+         "LTC 102": 0.65,  # 65cm offset for LTC 102  
+         "LTC 103": 0.55   # 55cm offset for LTC 103
+     }
+    
     plotter.plot_complete_results(
-        probe_data=probe_manager.get_data(),
-        #snapshots=snapshot_manager.snapshots,
-        rain_scenario=rain_scenario,
         filename=config.output_dir / f'rain_simulation_{now}_TEST.png',
         comsol_data_file=config.data_input_dir / "RAF_COMSOL_PZ_CG.csv",
         comsol_ref_date=datetime(2024, 2, 22),  # COMSOL t=0 corresponds to February 22, 2024
         measured_data_file=config.data_input_dir / "MEASURED_PZ_CG.csv",
-        measured_offset=0.6,  # Add 60cm to measured data
+        measured_offset=measured_offsets
     )
-    
     
     # ==========================================
     # 9. CREATE GIF ANIMATION (OPTIONAL)

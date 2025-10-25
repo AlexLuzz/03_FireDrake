@@ -5,21 +5,64 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.gridspec import GridSpec
 import numpy as np
+import pandas as pd
 from scipy.interpolate import LinearNDInterpolator, interp1d
 from datetime import datetime
-import csv
-from tools.data_import import load_and_align_data, smooth_data
+from tools.csv_loader import CSVLoader
+from tools.time_converter import TimeConverter
+from tools.import_results import ImportResults
 
 
 class ResultsPlotter:
     """Creates complete visualization with time series and spatial snapshots"""
     
-    def __init__(self, config, mesh):
+    def __init__(self, config, mesh, 
+                 probe_manager=None,
+                 rain_scenario=None, 
+                 domain=None,
+                 snapshot_manager=None
+                 ):
+        """
+        Initialize plotter with configuration and optional managers
+        
+        Args:
+            config: SimulationConfig object
+            mesh: Firedrake mesh
+            probe_manager: ProbeManager instance (optional)
+            rain_scenario: Rain/source scenario (optional)
+            domain: Domain object for bounds (optional, can be inferred from probe_manager)
+            snapshot_manager: SnapshotManager instance (optional) 
+        """
         self.config = config
         self.mesh = mesh
         self.coords = mesh.coordinates.dat.data
+        self.probe_manager = probe_manager
+        self.snapshot_manager = snapshot_manager
+        self.rain_scenario = rain_scenario
+        self.domain = domain or (probe_manager.domain if probe_manager else None)
+        
+        # Initialize data importer
+        time_converter = getattr(config, 'time_converter', None)
+        self.data_importer = ImportResults(time_converter)
+    
+    def set_managers(self, probe_manager=None, snapshot_manager=None, rain_scenario=None):
+        """Update managers after initialization"""
+        if probe_manager is not None:
+            self.probe_manager = probe_manager
+        if snapshot_manager is not None:
+            self.snapshot_manager = snapshot_manager
+        if rain_scenario is not None:
+            self.rain_scenario = rain_scenario
+    
+    def plot_results(self, filename=None, **kwargs):
+        """Convenience method to plot with all default settings"""
+        return self.plot_complete_results(filename=filename, **kwargs)
+    
+    def quick_plot(self, filename=None):
+        """Quick plot with minimal parameters - uses all stored managers"""
+        return self.plot_complete_results(filename=filename)
 
-    def plot_complete_results(self, probe_data, snapshots=None, rain_scenario=None, 
+    def plot_complete_results(self, probe_data=None, snapshots=None, rain_scenario=None, 
                              filename=None, comsol_data_file=None, measured_data_file=None,
                              plot_residuals=False, plot_dates=True,
                              comsol_ref_date=None, measured_ref_date=None,
@@ -28,9 +71,9 @@ class ResultsPlotter:
         Create complete results figure
         
         Args:
-            probe_data: Dictionary from ProbeManager.get_data()
-            snapshots: Dictionary from SnapshotManager.snapshots
-            rain_scenario: Optional RainScenario for plotting rain events
+            probe_data: Dictionary from ProbeManager.get_data() (uses self.probe_manager if None)
+            snapshots: Dictionary from SnapshotManager.snapshots (uses self.snapshot_manager if None)
+            rain_scenario: Rain scenario for plotting (uses self.rain_scenario if None)
             filename: Output filename (optional)
             comsol_data_file: Path to CSV with COMSOL modeled data
             measured_data_file: Path to CSV with real measured data
@@ -40,6 +83,17 @@ class ResultsPlotter:
             measured_ref_date: Reference datetime for measured data (auto-inferred from config if None)
             measured_offset: Vertical offset to add to measured data in meters (e.g., 0.6 for 60cm)
         """
+        # Use instance variables if parameters not provided
+        if probe_data is None and self.probe_manager:
+            probe_data = self.probe_manager.get_data()
+        if snapshots is None and self.snapshot_manager:
+            snapshots = self.snapshot_manager.snapshots
+        if rain_scenario is None:
+            rain_scenario = self.rain_scenario
+        
+        # Validate required data
+        if probe_data is None:
+            raise ValueError("probe_data must be provided or probe_manager must be set in __init__")
         # Calculate start_from automatically if we have datetime config
         start_from = 0.0  # Default
         if hasattr(self.config, 'start_datetime') and self.config.start_datetime and comsol_ref_date:
@@ -62,11 +116,11 @@ class ResultsPlotter:
         measured_data = None
         
         if comsol_data_file:
-            comsol_data = load_and_align_data(
-                comsol_data_file, 
-                start_from, 
-                probe_data['times'][-1] / 3600.0 / 24.0,
-                data_type='COMSOL',
+            # Load COMSOL data using ImportResults
+            comsol_data = self.data_importer.load_comsol_data(
+                comsol_data_file,
+                start_from_days=start_from,
+                sim_duration_days=probe_data['times'][-1] / 3600.0 / 24.0,
                 ref_date=comsol_ref_date
             )
             # Auto-enable residuals if COMSOL data loaded
@@ -74,14 +128,31 @@ class ResultsPlotter:
                 plot_residuals = True
         
         if measured_data_file:
-            # For measured data, use start_from=0 since it's already aligned to simulation start
-            measured_data = load_and_align_data(
+            # Set up individual piezometer offsets (can be customized)
+            if isinstance(measured_offset, dict):
+                # Dictionary of individual offsets: {"LTC 101": 0.6, "LTC 102": 0.65, ...}
+                for pz_id, offset in measured_offset.items():
+                    self.data_importer.add_piezometer_offset(pz_id, vertical_offset=offset)
+            else:
+                # Single offset for all piezometers
+                for i in [101, 102, 103]:  # Standard piezometer IDs
+                    self.data_importer.add_piezometer_offset(f"LTC {i}", vertical_offset=measured_offset)
+            
+            # Calculate simulation period for filtering
+            if measured_ref_date and hasattr(self.config, 'time_converter'):
+                # Calculate start and end datetime for measured data
+                sim_duration_days = probe_data['times'][-1] / 3600.0 / 24.0
+                start_datetime = measured_ref_date
+                end_datetime = measured_ref_date + pd.Timedelta(days=sim_duration_days)
+            else:
+                start_datetime = end_datetime = None
+            
+            # Load measured data using ImportResults
+            measured_data = self.data_importer.load_measured_data(
                 measured_data_file,
-                start_from=0.0,  # Measured data ref_date is simulation start, so no offset needed
-                sim_duration_days=probe_data['times'][-1] / 3600.0 / 24.0,
-                data_type='Measured',
-                ref_date=measured_ref_date,
-                offset=measured_offset
+                start_datetime=start_datetime,
+                end_datetime=end_datetime,
+                apply_offsets=True
             )
         
         # Calculate layout
@@ -143,7 +214,6 @@ class ResultsPlotter:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         print(f"\n✓ Plot saved: {filename}")
         plt.close()
-    
 
     
     def _plot_time_series(self, fig, gs_slice, probe_data, rain_scenario, 
@@ -225,13 +295,18 @@ class ResultsPlotter:
         if rain_scenario:
             for idx, event in enumerate(rain_scenario.events):
                 if use_datetime:
-                    start_dt = self.config.time_converter.to_datetime(event.start_time * 3600)
-                    end_dt = self.config.time_converter.to_datetime(event.end_time * 3600)
+                    # event.start_dt and end_dt are datetime objects
+                    start_dt = event.start_dt
+                    end_dt = event.end_dt
                     # Only add label for first rain event to avoid duplicates
-                    ax.axvspan(start_dt, end_dt, alpha=0.15, color='lightblue', 
-                              label='Rain event' if idx == 0 else '')
+                    if start_dt and end_dt:  # Check they exist
+                        ax.axvspan(start_dt, end_dt, alpha=0.15, color='lightblue', 
+                                  label='Rain event' if idx == 0 else '')
                 else:
-                    ax.axvspan(event.start_time, event.end_time, 
+                    # Convert simulation time (seconds) to time units
+                    start_time = event.start / 3600.0  # seconds to hours
+                    end_time = event.end / 3600.0      # seconds to hours
+                    ax.axvspan(start_time, end_time, 
                               alpha=0.15, color='lightblue', 
                               label='Rain event' if idx == 0 else '')
         
@@ -357,8 +432,16 @@ class ResultsPlotter:
             sat = np.clip(sat, 0, 1)
             
             # Interpolate to regular grid
-            xi = np.linspace(0, self.config.Lx, 200)
-            yi = np.linspace(0, self.config.Ly, 100)
+            domain = self.domain or (self.probe_manager.domain if self.probe_manager else None)
+            if domain:
+                xi = np.linspace(0, domain.Lx, 200)
+                yi = np.linspace(0, domain.Ly, 100)
+            else:
+                # Fall back to mesh bounds
+                x_coords = self.coords[:, 0]
+                y_coords = self.coords[:, 1]
+                xi = np.linspace(x_coords.min(), x_coords.max(), 200)
+                yi = np.linspace(y_coords.min(), y_coords.max(), 100)
             Xi, Yi = np.meshgrid(xi, yi)
             
             interp = LinearNDInterpolator(np.column_stack((x_coords, y_coords)), sat)
@@ -390,9 +473,17 @@ class ResultsPlotter:
                 ax.set_title(f't = {t/3600:.1f}h', fontsize=11, fontweight='bold')
             
             ax.set_aspect('equal')
-            ax.set_xlim(0, self.config.Lx)
-            ax.set_ylim(0, self.config.Ly)
-        
+            domain = self.domain or (self.probe_manager.domain if self.probe_manager else None)
+            if domain:
+                ax.set_xlim(0, domain.Lx)
+                ax.set_ylim(0, domain.Ly)
+            else:
+                # Use mesh bounds
+                x_coords = self.coords[:, 0]
+                y_coords = self.coords[:, 1]
+                ax.set_xlim(x_coords.min(), x_coords.max())
+                ax.set_ylim(y_coords.min(), y_coords.max())
+
         # Colorbar
         cbar_ax = fig.add_axes([0.92, 0.11, 0.02, 0.56])
         cbar = fig.colorbar(contour_for_cbar, cax=cbar_ax)

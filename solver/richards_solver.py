@@ -13,7 +13,7 @@ class RichardsSolver:
     Implements: Cm * ∂Hp/∂t - ∇·(kr * Ks * ∇Hp) = rain_flux
     """
 
-    def __init__(self, V, domain, rain_scenario, bc_manager, config):
+    def __init__(self, V, domain, source_scenario, bc_manager, config):
         """
         Initialize solver
         
@@ -21,14 +21,14 @@ class RichardsSolver:
             mesh: Firedrake mesh
             V: Function space
             domain: Domain object with material properties
-            rain_scenario: RainScenario object
+            source_scenario: SourceScenario object (rain/sources)
             bc_manager: BoundaryConditionManager
             config: SimulationConfig
         """
         self.mesh = domain.mesh
         self.V = V
         self.domain = domain
-        self.rain_scenario = rain_scenario
+        self.source_scenario = source_scenario
         self.bc_manager = bc_manager
         self.config = config
         
@@ -81,8 +81,8 @@ class RichardsSolver:
         bcs = self.bc_manager.get_dirichlet_bcs(t)
         
         # Get rain flux expression
-        rain_flux = self.rain_scenario.get_flux_expression(t / 3600.0, self.mesh)
-        
+        rain_flux = self.source_scenario.get_flux_expression(self.mesh, t)
+
         # Define variational problem
         p = TrialFunction(self.V)  # Unknown pressure head (to solve for)
         q = TestFunction(self.V)   # Test function (mathematical trick for FEM)
@@ -167,7 +167,8 @@ class RichardsSolver:
             
             # TERM 4: BOUNDARY FLUX (from ∫_∂Ω flux · q d∂Ω)
             # This is the infiltration/rainfall boundary condition on top surface
-            # Positive rain_flux means water entering the domain
+            # Positive rain_flux means water entering the domain, so we subtract it
+            # from the residual (negative sign makes rain add water to the system)
             # ds(4) integrates over boundary marker 4 (top surface)
             rain_flux * q * ds(4)
         )

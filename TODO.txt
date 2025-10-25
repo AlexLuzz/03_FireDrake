@@ -1,0 +1,25 @@
+# TODO
+
+## 🔄 In Progress
+
+    ## High Priority 🔥
+    - [ ] REPAIR THE CODE
+    - [ ] Fix datetime implementation
+    - [ ] Build a functioning generic source_term instead of former rain_scenario
+
+    ## Medium Priority ⚡
+    - [ ] Clean former rain_scenario
+    - [ ] Implement test script with ANALYTICAL solution for validation
+
+    ## Low Priority 💡
+    - [ ] Code cleanup
+    - [ ] Documentation
+
+
+## ✅ Completed
+- [x] Initial setup
+- [x] Basic structure
+
+## 🚀 Future Ideas
+- [ ] Add advanced features
+- [ ] Performance optimization
