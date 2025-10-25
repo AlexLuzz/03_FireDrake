@@ -3,7 +3,7 @@ Setup module: Configuration, rain scenarios, and monitoring
 """
 
 from .config import SimulationConfig
-from .source_term import SourceScenario, Zone
+from .source_term import SourceScenario, Zone, rainfall_scenario
 from .monitoring import ProbeManager, SnapshotManager
 
 __all__ = [
@@ -12,4 +12,5 @@ __all__ = [
     'Zone',
     'ProbeManager',
     'SnapshotManager',
+    'rainfall_scenario',
 ]

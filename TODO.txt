@@ -3,14 +3,13 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [ ] Improve physics architecture, i.e. better separation between 
+    - [ ] Improve physics architecture, i.e. better separation between domain, materials and equations
     - [ ] 
     - [ ] 
 
     ## Medium Priority ⚡
     - [ ] Better implementation of equation setup and solving, i.e. richards solver and building 
       should be separated
-    - [ ] Implement building rain_scenarios from meteostat (will it match measured data better ?)
     - [ ] Implement Hampel filtering for measured data, resave the csv after
     - [ ] Implement test script with ANALYTICAL solution for validation
 
@@ -20,6 +19,8 @@
 
 
 ## ✅ Completed
+- [x] Implement building rain_scenarios from meteostat (will it match measured data better ?)
+        -> YES KINDA WORK BETTER, NEED TO FIND THE PROPER STATION I THINK
 - [x] Clean former rain_scenario
 - [x] REPAIR THE CODE : IT WAS THE CHANGE IN SMOOTHING PARAMETER IN MATERiAL.FROM_CURVES
 - [x] Fix datetime implementation

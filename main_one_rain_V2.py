@@ -17,7 +17,7 @@ def main():
         name="Datetime_Duration",
         start_datetime=datetime(2024, 4, 1), # YYYY, MM, DD
         end_datetime=datetime(2024, 4, 30),
-        dt_td=timedelta(hours=6)
+        dt_td=timedelta(hours=2)
     )
     # ==========================================
     # 2. DEFINE RAIN SCENARIO
@@ -33,7 +33,8 @@ def main():
         csv_path=config.data_input_dir / "BB_METEO.csv",
         from_date=config.start_datetime,
         to_date=config.end_datetime,
-        rain_unit="mm/day",
+        #meteostat_station='SOK6B',
+        #meteostat_agg_hours=6,
         zones=rain_zones
     )
     
@@ -68,7 +69,7 @@ def main():
     bc_manager = BoundaryConditionManager(
         V,
         initial_water_table=1.2,
-        water_table_trend=None,
+        water_table_trend=water_table_trend,
         time_converter=config.time_converter
     )
     
@@ -107,18 +108,15 @@ def main():
                              #snapshot_manager
                              )
     
-    # Example: Individual piezometer offsets (if different heights needed)
+    # Example: Individual piezometer offsets for Chabanel-Galinée IVD
     measured_offsets = {
-         "LTC 101": 0.60,  # 60cm offset for LTC 101
-         "LTC 102": 0.65,  # 65cm offset for LTC 102  
-         "LTC 103": 0.55   # 55cm offset for LTC 103
+         "LTC 101": 0.60,  # real altitude: 32.072
+         "LTC 102": 0.70,  # real altitude: 32.094
+         "LTC 103": 0.35   # real altitude: 31.878
      }
     
     plotter.plot_complete_results(
         filename=config.output_dir / f'rain_simulation_{now}_TEST.png',
-        comsol_data_file=config.data_input_dir / "RAF_COMSOL_PZ_CG.csv",
-        comsol_ref_date=datetime(2024, 2, 22),  # COMSOL t=0 corresponds to February 22, 2024
-        measured_data_file=config.data_input_dir / "MEASURED_PZ_CG.csv",
         measured_offset=measured_offsets
     )
     

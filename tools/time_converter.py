@@ -72,31 +72,3 @@ class TimeConverter:
             result[col] = loader.get_numeric(col)
         
         return result
-
-
-def create_datetime_array(time_converter: TimeConverter, times_seconds: np.ndarray) -> np.ndarray:
-    """Create datetime array from simulation seconds"""
-    return np.array([time_converter.to_datetime(t) for t in times_seconds])
-
-
-def format_time_axis(ax, time_converter: TimeConverter, times_seconds: np.ndarray, 
-                    max_ticks: int = 10):
-    """Format time axis with appropriate datetime labels"""
-    import matplotlib.dates as mdates
-    
-    datetimes = create_datetime_array(time_converter, times_seconds)
-    ax.set_xlim(datetimes[0], datetimes[-1])
-    
-    time_span_days = (datetimes[-1] - datetimes[0]).days
-    
-    if time_span_days <= 1:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, 24//max_ticks)))
-    elif time_span_days <= 30:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-        ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, time_span_days//max_ticks)))
-    else:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(1, time_span_days//30//max_ticks)))
-    
-    ax.tick_params(axis='x', rotation=45)

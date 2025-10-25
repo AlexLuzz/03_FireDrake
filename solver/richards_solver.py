@@ -80,7 +80,7 @@ class RichardsSolver:
         
         # Get rain flux expression from SourceScenario
         # NOTE: t must be in seconds (SourceScenario expects seconds)
-        rain_flux = self.source_scenario.get_flux_expression(self.mesh, t)
+        rain_flux = -self.source_scenario.get_flux_expression(t, self.mesh)
 
         # Define variational problem
         p = TrialFunction(self.V)  # Unknown pressure head

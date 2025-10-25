@@ -53,7 +53,7 @@ class CurveData:
     def y_max(self) -> float:
         return float(self.y_values.max())
     
-    def smooth(self, window_size: int = 3) -> 'CurveData':
+    def smooth(self, window_size: int = 1) -> 'CurveData':
         """
         Apply moving average smoothing
         

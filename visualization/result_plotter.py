@@ -8,9 +8,10 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import LinearNDInterpolator, interp1d
 from datetime import datetime
-from tools.csv_loader import CSVLoader
-from tools.time_converter import TimeConverter
-from tools.import_results import ImportResults
+from tools.import_results import (
+    load_comsol_data, load_measured_data, calculate_residuals, 
+    preview_data, DEFAULT_OFFSETS
+)
 
 
 class ResultsPlotter:
@@ -40,29 +41,68 @@ class ResultsPlotter:
         self.snapshot_manager = snapshot_manager
         self.rain_scenario = rain_scenario
         self.domain = domain or (probe_manager.domain if probe_manager else None)
+    
+    def preview_reference_data(self, comsol_data_file=None, measured_data_file=None, 
+                              comsol_ref_date=None, measured_ref_date=None, 
+                              measured_offset=0.0, figsize=(14, 8)):
+        """Preview reference data (COMSOL and/or measured) before plotting"""
+        comsol_data = None
+        measured_data = None
         
-        # Initialize data importer
-        time_converter = getattr(config, 'time_converter', None)
-        self.data_importer = ImportResults(time_converter)
+        # Load COMSOL data if provided
+        if comsol_data_file:
+            try:
+                # Calculate start_from for COMSOL data alignment
+                start_from = 0.0
+                if hasattr(self.config, 'start_datetime') and self.config.start_datetime and comsol_ref_date:
+                    start_from = (self.config.start_datetime - comsol_ref_date).total_seconds() / 86400.0
+                
+                comsol_data = load_comsol_data(
+                    comsol_data_file,
+                    start_from_days=start_from,
+                    sim_duration_days=None  # Load all available data for preview
+                )
+            except Exception as e:
+                print(f"⚠️  Could not load COMSOL data: {e}")
+        
+        # Load measured data if provided
+        if measured_data_file:
+            try:
+                # Set up offsets
+                offsets = DEFAULT_OFFSETS.copy()
+                if isinstance(measured_offset, dict):
+                    offsets.update(measured_offset)
+                else:
+                    for i in [101, 102, 103]:
+                        offsets[f"LTC {i}"] = measured_offset
+                
+                measured_data = load_measured_data(
+                    measured_data_file,
+                    time_converter=self.config.time_converter,
+                    start_datetime=None,  # Load all available data for preview
+                    end_datetime=None,
+                    offsets=offsets,
+                    smooth_window=4,
+                    hampel_window=5,
+                    hampel_sigma=3.0
+                )
+            except Exception as e:
+                print(f"⚠️  Could not load measured data: {e}")
+        
+        # Create preview plot
+        if comsol_data or measured_data:
+            fig = preview_data(
+                comsol_data=comsol_data,
+                measured_data=measured_data,
+                time_converter=getattr(self.config, 'time_converter', None),
+                figsize=figsize
+            )
+            return fig
+        else:
+            print("⚠️  No data to preview")
+            return None
     
-    def set_managers(self, probe_manager=None, snapshot_manager=None, rain_scenario=None):
-        """Update managers after initialization"""
-        if probe_manager is not None:
-            self.probe_manager = probe_manager
-        if snapshot_manager is not None:
-            self.snapshot_manager = snapshot_manager
-        if rain_scenario is not None:
-            self.rain_scenario = rain_scenario
-    
-    def plot_results(self, filename=None, **kwargs):
-        """Convenience method to plot with all default settings"""
-        return self.plot_complete_results(filename=filename, **kwargs)
-    
-    def quick_plot(self, filename=None):
-        """Quick plot with minimal parameters - uses all stored managers"""
-        return self.plot_complete_results(filename=filename)
-
-    def plot_complete_results(self, probe_data=None, snapshots=None, rain_scenario=None, 
+    def plot_complete_results(self, 
                              filename=None, comsol_data_file=None, measured_data_file=None,
                              plot_residuals=False, plot_dates=True,
                              comsol_ref_date=None, measured_ref_date=None,
@@ -83,13 +123,16 @@ class ResultsPlotter:
             measured_ref_date: Reference datetime for measured data (auto-inferred from config if None)
             measured_offset: Vertical offset to add to measured data in meters (e.g., 0.6 for 60cm)
         """
-        # Use instance variables if parameters not provided
-        if probe_data is None and self.probe_manager:
-            probe_data = self.probe_manager.get_data()
-        if snapshots is None and self.snapshot_manager:
-            snapshots = self.snapshot_manager.snapshots
-        if rain_scenario is None:
-            rain_scenario = self.rain_scenario
+        probe_data = self.probe_manager.get_data() 
+        snapshots = self.snapshot_manager.snapshots if self.snapshot_manager else None
+        rain_scenario = self.rain_scenario if self.rain_scenario else None
+
+        if comsol_data_file is None :
+            comsol_data_file = self.config.data_input_dir / "RAF_COMSOL_PZ_CG.csv"
+        if comsol_ref_date is None :
+            comsol_ref_date = datetime(2024, 2, 22)  # COMSOL t=0 corresponds to February 22, 2024
+        if measured_data_file is None :
+            measured_data_file = self.config.data_input_dir / "MEASURED_PZ_CG.csv"
         
         # Validate required data
         if probe_data is None:
@@ -116,27 +159,29 @@ class ResultsPlotter:
         measured_data = None
         
         if comsol_data_file:
-            # Load COMSOL data using ImportResults
-            comsol_data = self.data_importer.load_comsol_data(
-                comsol_data_file,
-                start_from_days=start_from,
-                sim_duration_days=probe_data['times'][-1] / 3600.0 / 24.0,
-                ref_date=comsol_ref_date
-            )
-            # Auto-enable residuals if COMSOL data loaded
-            if comsol_data and not plot_residuals:
-                plot_residuals = True
+            # Load COMSOL data using utility function
+            try:
+                comsol_data = load_comsol_data(
+                    comsol_data_file,
+                    start_from_days=start_from,
+                    sim_duration_days=probe_data['times'][-1] / 3600.0 / 24.0
+                )
+                # Auto-enable residuals if COMSOL data loaded
+                if comsol_data and not plot_residuals:
+                    plot_residuals = True
+            except Exception as e:
+                print(f"⚠️  Could not load COMSOL data: {e}")
         
         if measured_data_file:
-            # Set up individual piezometer offsets (can be customized)
+            # Set up individual piezometer offsets
+            offsets = DEFAULT_OFFSETS.copy()  # Start with defaults
             if isinstance(measured_offset, dict):
                 # Dictionary of individual offsets: {"LTC 101": 0.6, "LTC 102": 0.65, ...}
-                for pz_id, offset in measured_offset.items():
-                    self.data_importer.add_piezometer_offset(pz_id, vertical_offset=offset)
+                offsets.update(measured_offset)
             else:
                 # Single offset for all piezometers
                 for i in [101, 102, 103]:  # Standard piezometer IDs
-                    self.data_importer.add_piezometer_offset(f"LTC {i}", vertical_offset=measured_offset)
+                    offsets[f"LTC {i}"] = measured_offset
             
             # Calculate simulation period for filtering
             if measured_ref_date and hasattr(self.config, 'time_converter'):
@@ -147,13 +192,20 @@ class ResultsPlotter:
             else:
                 start_datetime = end_datetime = None
             
-            # Load measured data using ImportResults
-            measured_data = self.data_importer.load_measured_data(
-                measured_data_file,
-                start_datetime=start_datetime,
-                end_datetime=end_datetime,
-                apply_offsets=True
-            )
+            # Load measured data using utility function
+            try:
+                measured_data = load_measured_data(
+                    measured_data_file,
+                    time_converter=self.config.time_converter,
+                    start_datetime=start_datetime,
+                    end_datetime=end_datetime,
+                    offsets=offsets,
+                    smooth_window=30,  # Apply default smoothing
+                    hampel_window=120,  # Apply default outlier removal
+                    hampel_sigma=3.0
+                )
+            except Exception as e:
+                print(f"⚠️  Could not load measured data: {e}")
         
         # Calculate layout
         n_rows = 1  # Time series
@@ -295,9 +347,9 @@ class ResultsPlotter:
         if rain_scenario:
             for idx, event in enumerate(rain_scenario.events):
                 if use_datetime:
-                    # event.start_dt and end_dt are datetime objects
-                    start_dt = event.start_dt
-                    end_dt = event.end_dt
+                    # event.start_datetime and end_datetime are datetime objects
+                    start_dt = event.start_datetime
+                    end_dt = event.end_datetime
                     # Only add label for first rain event to avoid duplicates
                     if start_dt and end_dt:  # Check they exist
                         ax.axvspan(start_dt, end_dt, alpha=0.15, color='lightblue', 
