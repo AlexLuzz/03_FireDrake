@@ -3,12 +3,15 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [ ] REPAIR THE CODE
-    - [ ] Fix datetime implementation
-    - [ ] Build a functioning generic source_term instead of former rain_scenario
+    - [ ] Improve physics architecture, i.e. better separation between 
+    - [ ] 
+    - [ ] 
 
     ## Medium Priority ⚡
-    - [ ] Clean former rain_scenario
+    - [ ] Better implementation of equation setup and solving, i.e. richards solver and building 
+      should be separated
+    - [ ] Implement building rain_scenarios from meteostat (will it match measured data better ?)
+    - [ ] Implement Hampel filtering for measured data, resave the csv after
     - [ ] Implement test script with ANALYTICAL solution for validation
 
     ## Low Priority 💡
@@ -17,8 +20,13 @@
 
 
 ## ✅ Completed
+- [x] Clean former rain_scenario
+- [x] REPAIR THE CODE : IT WAS THE CHANGE IN SMOOTHING PARAMETER IN MATERiAL.FROM_CURVES
+- [x] Fix datetime implementation
+- [x] Build a functioning generic source_term instead of former rain_scenario
 - [x] Initial setup
 - [x] Basic structure
+
 
 ## 🚀 Future Ideas
 - [ ] Add advanced features

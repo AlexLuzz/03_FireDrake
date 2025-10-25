@@ -84,7 +84,7 @@ class SoilMaterial:
     @classmethod
     def from_curves(cls, name: str, pressure_heads: list = None, theta_values: list = None, 
                     kr_values: list = None, Ks: float = None, theta_r: float = None, 
-                    theta_s: float = None, smooth_window: int = 3):
+                    theta_s: float = None, smooth_window: int = 1):
         """
         Create material from empirical curve data with interpolation
         
