@@ -1,6 +1,42 @@
 """
 Hydraulic models for soil water flow
-Includes Van Genuchten analytical model and curve-based empirical model
+
+PURPOSE:
+========
+These classes define the constitutive relationships between pressure head and:
+- θ(p): Water content [m³/m³]
+- kr(p): Relative permeability [-]
+- Cm(p) = ∂θ/∂p: Moisture capacity [1/m]
+
+Two model types are available:
+1. **VanGenuchtenModel**: Analytical equations (Van Genuchten-Mualem)
+   - Best for: Standard soils with known parameters
+   - Advantages: Smooth, differentiable, widely validated
+   - Disadvantages: Limited to Van Genuchten form, sometimes inappropriate curvatures
+   
+2. **CurveBasedHydraulicModel**: Empirical data interpolation
+   - Best for: Custom soils with measured retention/permeability curves
+   - Advantages: Can represent any measured behavior, allows specific curves
+
+
+Both implement the same HydraulicModel interface, so they're interchangeable
+in the simulation framework.
+
+USAGE:
+======
+# Analytical model
+vg_params = VanGenuchtenParams(theta_r=0.045, theta_s=0.35, alpha=14.5, n=2.68)
+sand_model = VanGenuchtenModel(vg_params)
+
+# Curve-based model from library
+till_model = CurveBasedHydraulicModel.from_library("till")
+
+# Curve-based model from custom data
+custom_model = CurveBasedHydraulicModel.from_data(
+    pressure_heads=[-10, -5, -1, 0],
+    theta_values=[0.05, 0.15, 0.30, 0.40],
+    kr_values=[0.001, 0.01, 0.1, 1.0]
+)
 """
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
@@ -41,35 +77,8 @@ class HydraulicModel(ABC):
     
     @abstractmethod
     def dtheta_dp(self, pressure) -> float:
-        """Moisture capacity: ∂θ/∂Hp [1/m]"""
+        """Moisture capacity: ∂θ/∂p [1/m]"""
         pass
-    
-    def Se(self, pressure) -> float:
-        """
-        Effective saturation (default implementation)
-        Se = (θ - θr) / (θs - θr)
-        """
-        theta = self.theta(pressure)
-        return (theta - self.theta_r) / (self.theta_s - self.theta_r)
-    
-    def compute_fields(self, pressure_array: np.ndarray) -> tuple:
-        """
-        Vectorized computation of θ, Cm, kr fields
-        
-        Returns:
-        --------
-        theta_field, Cm_field, kr_field : np.ndarray
-        """
-        # Vectorize the scalar functions
-        theta_vec = np.vectorize(self.theta)
-        dtheta_dp_vec = np.vectorize(self.dtheta_dp)
-        kr_vec = np.vectorize(self.kr)
-        
-        theta_field = theta_vec(pressure_array)
-        Cm_field = dtheta_dp_vec(pressure_array)
-        kr_field = kr_vec(pressure_array)
-        
-        return theta_field, Cm_field, kr_field
 
 
 # ==============================================
@@ -130,14 +139,10 @@ class VanGenuchtenModel(HydraulicModel):
         return self.params.theta_s
     
     def _effective_saturation(self, pressure: float) -> float:
-        """
-        Calculate effective saturation with epsilon smoothing
-        """
+        """Calculate effective saturation with epsilon smoothing"""
         if pressure >= self.epsilon:
-            # Fully saturated
             return 1.0
         elif pressure <= -self.epsilon:
-            # Unsaturated (standard VG)
             return (1.0 + (self.params.alpha * abs(pressure))**self.params.n)**(-self.params.m)
         else:
             # Smooth transition zone [-epsilon, +epsilon]
@@ -232,7 +237,7 @@ class CurveBasedHydraulicModel(HydraulicModel):
             method='linear',
             extrapolate_mode='clip',
             bounds=(self._theta_r, self._theta_s),
-            fill_value_above=self._theta_s  # Saturated above max pressure
+            fill_value_above=self._theta_s
         )
         
         self._kr_interp = CurveInterpolator(
@@ -240,10 +245,9 @@ class CurveBasedHydraulicModel(HydraulicModel):
             method='linear',
             extrapolate_mode='clip',
             bounds=(self.kr_min, 1.0),
-            fill_value_above=1.0  # Fully permeable when saturated
+            fill_value_above=1.0
         )
         
-        # Store original curves for reference
         self.theta_curve = theta_curve
         self.kr_curve = kr_curve
     
@@ -272,40 +276,8 @@ class CurveBasedHydraulicModel(HydraulicModel):
         if pressure >= self.epsilon:
             return self.Ss
         
-        # Use interpolator's built-in derivative
         Cm = self._theta_interp.derivative(pressure)
         return max(self.Ss, abs(Cm))
-    
-    def compute_fields(self, pressure_array: np.ndarray) -> tuple:
-        """
-        Optimized vectorized computation for curve-based model
-        Avoids repeated function calls
-        """
-        # Handle saturation threshold
-        is_saturated = pressure_array >= self.epsilon
-        is_unsaturated = ~is_saturated
-        
-        # Initialize fields
-        theta_field = np.zeros_like(pressure_array)
-        Cm_field = np.zeros_like(pressure_array)
-        kr_field = np.zeros_like(pressure_array)
-        
-        # Saturated zone (simple values)
-        theta_field[is_saturated] = self._theta_s
-        Cm_field[is_saturated] = self.Ss
-        kr_field[is_saturated] = 1.0
-        
-        # Unsaturated zone (use interpolators)
-        if np.any(is_unsaturated):
-            p_unsat = pressure_array[is_unsaturated]
-            theta_field[is_unsaturated] = self._theta_interp(p_unsat)
-            kr_field[is_unsaturated] = self._kr_interp(p_unsat)
-            
-            # Compute moisture capacity
-            Cm_unsat = self._theta_interp.derivative(p_unsat)
-            Cm_field[is_unsaturated] = np.maximum(self.Ss, np.abs(Cm_unsat))
-        
-        return theta_field, Cm_field, kr_field
     
     @classmethod
     def from_library(cls, soil_type: str, smooth_window: int = 1, **kwargs):
@@ -319,11 +291,6 @@ class CurveBasedHydraulicModel(HydraulicModel):
         smooth_window : int
             Window size for smoothing (1 = no smoothing)
         **kwargs : additional parameters for __init__
-        
-        Example:
-        --------
-        till_model = CurveBasedHydraulicModel.from_library("till")
-        till_smooth = CurveBasedHydraulicModel.from_library("till", smooth_window=3)
         """
         soil_type = soil_type.lower()
         
@@ -336,7 +303,6 @@ class CurveBasedHydraulicModel(HydraulicModel):
         else:
             raise ValueError(f"Unknown soil type: {soil_type}. Available: 'till', 'terreau'")
         
-        # Apply smoothing if requested
         if smooth_window > 1:
             theta_curve = theta_curve.smooth(smooth_window)
             kr_curve = kr_curve.smooth(smooth_window)
@@ -368,31 +334,8 @@ class CurveBasedHydraulicModel(HydraulicModel):
                             x_name="pressure", y_name="kr",
                             units_x="m", units_y="-")
         
-        # Apply smoothing if requested
         if smooth_window > 1:
             theta_curve = theta_curve.smooth(smooth_window)
             kr_curve = kr_curve.smooth(smooth_window)
         
         return cls(theta_curve, kr_curve, **kwargs)
-
-# ==============================================
-# MATERIAL FACTORIES (convenience functions)
-# ==============================================
-
-def till(Ks=9e-6):
-    """Till material: (HydraulicModel, Ks)"""
-    return CurveBasedHydraulicModel.from_library("till"), Ks
-
-def terreau(Ks=4e-5):
-    """Terreau material: (HydraulicModel, Ks)"""
-    return CurveBasedHydraulicModel.from_library("terreau"), Ks
-
-def sand(Ks=1e-4):
-    """Sand material: (HydraulicModel, Ks)"""
-    vg = VanGenuchtenParams(theta_r=0.045, theta_s=0.35, alpha=14.5, n=2.68)
-    return VanGenuchtenModel(vg), Ks
-
-def clay(Ks=1e-9):
-    """Clay material: (HydraulicModel, Ks)"""
-    vg = VanGenuchtenParams(theta_r=0.068, theta_s=0.38, alpha=0.8, n=1.09)
-    return VanGenuchtenModel(vg), Ks

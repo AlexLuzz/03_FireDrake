@@ -70,11 +70,19 @@ class RichardsSolver:
             t += self.config.dt
             self.solve_timestep(t)
             
+            # Record probes (generic + specialized)
             if probe_manager is not None:
-                probe_manager.record(t, self.p_new)
+                probe_manager.record(t, self.p_new, "pressure")
+                probe_manager.record_water_table(t, self.p_new)
+            
+            # Record snapshots
             if snapshot_manager is not None:
                 if snapshot_manager.should_record(t, self.config.dt):
-                    snapshot_manager.record(t, self.p_new)
+                    snapshot_manager.record(t, self.p_new, "pressure")
+                    
+                    # Also record saturation
+                    Se = self.field_map.compute_saturation_field(self.p_new)
+                    snapshot_manager.record(t, Se, "saturation")
 
             if step % max(1, int(0.05 * self.config.num_steps)) == 0:
                 progress = step / self.config.num_steps

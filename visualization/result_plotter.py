@@ -127,12 +127,14 @@ class ResultsPlotter:
         snapshots = self.snapshot_manager.snapshots if self.snapshot_manager else None
         rain_scenario = self.rain_scenario if self.rain_scenario else None
 
+        """
         if comsol_data_file is None :
             comsol_data_file = self.config.data_input_dir / "RAF_COMSOL_PZ_CG.csv"
         if comsol_ref_date is None :
             comsol_ref_date = datetime(2024, 2, 22)  # COMSOL t=0 corresponds to February 22, 2024
         if measured_data_file is None :
             measured_data_file = self.config.data_input_dir / "MEASURED_PZ_CG.csv"
+        """
         
         # Validate required data
         if probe_data is None:

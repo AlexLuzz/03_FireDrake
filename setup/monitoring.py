@@ -1,140 +1,216 @@
-# monitoring/probes.py
 """
-Monitoring utilities for time series and spatial snapshots
+Generic monitoring for time series and spatial snapshots
 """
 import numpy as np
 
 class ProbeManager:
-    """Manages water table elevation monitoring at specific x-locations"""
+    """
+    Monitor field values at specific spatial locations over time
+    Generic: works for pressure, concentration, temperature, etc.
+    """
     
-    def __init__(self, mesh, probes_positions=None, names=None):
+    def __init__(self, mesh, probe_positions=None, names=None):
+        """
+        Parameters:
+        -----------
+        mesh : Firedrake mesh
+        probe_positions : list of [x, y] coordinates
+        names : list of probe names
+        """
         self.mesh = mesh
-        # Default probe positions if none provided
-        if probes_positions is None:
-            probes_positions = [
-                [8.0, 1.0],
-                [10.0, 1.0], 
-                [12.5, 1.0]
-            ]
-        self.probes_positions = probes_positions
-        self.names = names or [f"Probe_{i+1}" for i in range(len(probes_positions))]
-        self.data = {name: [] for name in self.names}
+        self.coords = mesh.coordinates.dat.data
+        
+        # Default probe positions
+        if probe_positions is None:
+            probe_positions = [[8.0, 1.0], [10.0, 1.0], [12.5, 1.0]]
+        
+        self.probe_positions = probe_positions
+        self.names = names or [f"Probe_{i+1}" for i in range(len(probe_positions))]
+        
+        # Data storage: {probe_name: {field_name: [values]}}
+        self.data = {name: {} for name in self.names}
         self.times = []
         
-        # Fixed: Use 1% of domain width as tolerance (more robust)
-        self.coords = mesh.coordinates.dat.data
+        # Tolerance for finding nodes (1% of domain width)
         domain_width = self.coords[:, 0].max() - self.coords[:, 0].min()
-        self.x_tol = domain_width * 0.01  # 1% of domain width
+        self.x_tol = domain_width * 0.01
         
-        print(f"ProbeManager initialized with x_tol = {self.x_tol:.4f}m")
-        print(f"Probe positions: {self.probes_positions}")
-
-    def find_water_table_at_probe_pos(self, pressure_field, probe_pos):
-        """Find water table elevation (where p=0) at given probe position"""
-        p_vals = pressure_field.dat.data[:]
-        x_pos, _ = probe_pos
+        # Cache node indices for efficiency
+        self._probe_node_indices = self._find_probe_nodes()
+    
+    def _find_probe_nodes(self):
+        """Find nearest mesh node for each probe (cached for efficiency)"""
+        indices = []
+        for probe_pos in self.probe_positions:
+            x_probe, y_probe = probe_pos
+            # Find closest node
+            distances = np.sqrt((self.coords[:, 0] - x_probe)**2 + 
+                              (self.coords[:, 1] - y_probe)**2)
+            idx = np.argmin(distances)
+            indices.append(idx)
+        return indices
+    
+    def record(self, t: float, field, field_name: str = "value"):
+        """
+        Record field values at all probe locations (GENERIC)
         
-        # Find all nodes near this x position
+        Parameters:
+        -----------
+        t : float
+            Time [s]
+        field : Firedrake Function
+            Any field to monitor (pressure, concentration, etc.)
+        field_name : str
+            Name for this field (e.g., "pressure", "concentration")
+        """
+        # Add time if this is a new timestep
+        if not self.times or self.times[-1] != t:
+            self.times.append(t)
+        
+        # Extract values at probe locations
+        field_data = field.dat.data_ro
+        
+        for name, idx in zip(self.names, self._probe_node_indices):
+            if field_name not in self.data[name]:
+                self.data[name][field_name] = []
+            self.data[name][field_name].append(float(field_data[idx]))
+    
+    def record_water_table(self, t: float, pressure_field):
+        """
+        Record water table elevation (specialized method)
+        Finds where pressure = 0 along vertical at each probe x-position
+        """
+        if not self.times or self.times[-1] != t:
+            self.times.append(t)
+        
+        p_vals = pressure_field.dat.data_ro
+        
+        for probe_pos, name in zip(self.probe_positions, self.names):
+            wt = self._find_water_table_at_x(probe_pos[0], p_vals)
+            
+            if "water_table" not in self.data[name]:
+                self.data[name]["water_table"] = []
+            self.data[name]["water_table"].append(wt)
+    
+    def _find_water_table_at_x(self, x_pos: float, p_vals: np.ndarray):
+        """Find water table elevation at given x-position"""
+        # Find nodes near this x
         mask = np.abs(self.coords[:, 0] - x_pos) < self.x_tol
         if not np.any(mask):
-            print(f"⚠️  No nodes found near x={x_pos:.2f}m (tol={self.x_tol:.4f}m)")
-            return None
+            return np.nan
         
-        # Get y-coordinates and pressures at this x
-        y_coords = self.coords[mask, 1]  # Column 1 = y coordinates
+        # Get y-coordinates and pressures
+        y_coords = self.coords[mask, 1]
         p_at_x = p_vals[mask]
         
-        # Sort by y (bottom to top)
+        # Sort by y
         sort_idx = np.argsort(y_coords)
         y_sorted = y_coords[sort_idx]
         p_sorted = p_at_x[sort_idx]
         
-        # Case 1: Fully saturated column
+        # Find zero crossing
         if np.all(p_sorted > 0):
-            return float(y_sorted[-1])  # Water table at surface
-        
-        # Case 2: Fully unsaturated column
+            return float(y_sorted[-1])  # Fully saturated
         if np.all(p_sorted < 0):
-            return float(y_sorted[0])  # Water table at bottom
+            return float(y_sorted[0])   # Fully dry
         
-        # Case 3: Find zero crossing (linear interpolation)
+        # Interpolate to find p=0
         for i in range(len(p_sorted) - 1):
-            p1, p2 = p_sorted[i], p_sorted[i+1]
-            y1, y2 = y_sorted[i], y_sorted[i+1]
-            
-            # Check if zero is between these two points
-            if (p1 <= 0 <= p2) or (p2 <= 0 <= p1):
-                if abs(p2 - p1) > 1e-12:
-                    # Linear interpolation: y_wt = y1 + (0 - p1) * (y2 - y1) / (p2 - p1)
-                    wt_y = y1 - p1 * (y2 - y1) / (p2 - p1)
+            if (p_sorted[i] <= 0 <= p_sorted[i+1]) or (p_sorted[i+1] <= 0 <= p_sorted[i]):
+                if abs(p_sorted[i+1] - p_sorted[i]) > 1e-12:
+                    wt_y = y_sorted[i] - p_sorted[i] * (y_sorted[i+1] - y_sorted[i]) / (p_sorted[i+1] - p_sorted[i])
                     return float(wt_y)
-                else:
-                    return float((y1 + y2) / 2.0)
         
-        # Fallback: shouldn't reach here
         return float(y_sorted[len(y_sorted)//2])
     
-    def record(self, t, pressure_field):
-        """Record water table elevation at all probe locations"""
-        self.times.append(t)
-        for probe_pos, name in zip(self.probes_positions, self.names):
-            wt = self.find_water_table_at_probe_pos(pressure_field, probe_pos)
-            self.data[name].append(wt if wt is not None else np.nan)
+    def get_times_hours(self):
+        """Get times in hours"""
+        return np.array(self.times) / 3600.0
     
-    def record_initial(self, pressure_field):
-        """Record initial state at t=0"""
-        self.record(0.0, pressure_field)
+    def get_probe_data(self, probe_name: str, field_name: str):
+        """Get data for specific probe and field"""
+        return np.array(self.data[probe_name][field_name])
     
     def get_data(self):
-        """Get monitoring data"""
+        """Get all recorded data"""
         return {'times': np.array(self.times), 'data': self.data}
     
-    def save_to_csv(self, filename):
-        """Save water table data to CSV"""
+    def save_to_csv(self, filename: str):
+        """Save all data to CSV"""
         import csv
-        times_hours = np.array(self.times) / 3600.0
+        times_hours = self.get_times_hours()
         
         with open(filename, 'w', newline='') as f:
             writer = csv.writer(f)
-            header = ['time_hours'] + [f'{name}_elevation_m' for name in self.names]
+            
+            # Build header
+            header = ['time_hours']
+            for name in self.names:
+                for field_name in self.data[name].keys():
+                    header.append(f'{name}_{field_name}')
             writer.writerow(header)
             
+            # Write data
             for i, t in enumerate(times_hours):
-                row = [t] + [self.data[name][i] for name in self.names]
+                row = [t]
+                for name in self.names:
+                    for field_name in self.data[name].keys():
+                        row.append(self.data[name][field_name][i])
                 writer.writerow(row)
         
-        print(f"Water table data saved to {filename}")
+        print(f"✓ Probe data saved to {filename}")
 
 
 class SnapshotManager:
-    """Manages spatial snapshots at specific times"""
+    """
+    Record full spatial fields at specific times
+    Generic: stores any Firedrake Function
+    """
     
-    def __init__(self, snapshot_times, domain):
+    def __init__(self, snapshot_times):
+        """
+        Parameters:
+        -----------
+        snapshot_times : list of floats
+            Times [s] when snapshots should be recorded
+        """
         self.snapshot_times = list(snapshot_times)
-        self.snapshots = {}
-        self.domain = domain
+        self.snapshots = {}  # {time: {field_name: Function}}
     
-    def should_record(self, t, dt):
-        """Check if current time is close to a snapshot time"""
+    def should_record(self, t: float, dt: float):
+        """Check if current time matches a snapshot time"""
         for req_time in self.snapshot_times[:]:
             if abs(t - req_time) < dt * 0.6:
                 self.snapshot_times.remove(req_time)
                 return True
         return False
     
-    def record(self, t, pressure_field):
-        """Record snapshot at current time"""
-        saturation = self.domain.compute_saturation_field(pressure_field)
+    def record(self, t: float, field, field_name: str = "field"):
+        """
+        Record a field snapshot (GENERIC)
         
-        self.snapshots[t] = {
-            'pressure': pressure_field.copy(deepcopy=True),
-            'saturation': saturation.copy(deepcopy=True)
-        }
+        Parameters:
+        -----------
+        t : float
+            Time [s]
+        field : Firedrake Function
+            Any field to snapshot
+        field_name : str
+            Name for this field
+        """
+        if t not in self.snapshots:
+            self.snapshots[t] = {}
         
-        sat_vals = saturation.dat.data[:]
-        print(f"  Snapshot at t={t/3600:.2f}h: S=[{sat_vals.min():.3f}, {sat_vals.max():.3f}]")
+        self.snapshots[t][field_name] = field.copy(deepcopy=True)
+        
+        # Print stats
+        vals = field.dat.data_ro
+        print(f"  Snapshot at t={t/3600:.2f}h | {field_name}: [{vals.min():.3f}, {vals.max():.3f}]")
     
-    def record_initial(self, pressure_field):
-        """Record initial state at t=0"""
-        if 0.0 not in self.snapshots:
-            self.record(0.0, pressure_field)
+    def get_snapshot(self, t: float, field_name: str):
+        """Get a specific field at a specific time"""
+        return self.snapshots.get(t, {}).get(field_name)
+    
+    def get_times(self):
+        """Get all snapshot times"""
+        return sorted(self.snapshots.keys())

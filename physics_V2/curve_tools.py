@@ -5,7 +5,7 @@ Can be used for hydraulic, transport, thermal, geophysical properties
 from dataclasses import dataclass
 import numpy as np
 from scipy.interpolate import interp1d
-from typing import Optional, Literal, Callable
+from typing import Optional, Literal
 
 # ==============================================
 # GENERIC CURVE DATA
@@ -297,76 +297,3 @@ class HydraulicCurves:
         return CurveData(pressure_m, kr, x_name="pressure", y_name="kr",
                         units_x="m", units_y="-")
 
-
-class TransportCurves:
-    """Library of transport-related curves"""
-    
-    @staticmethod
-    def diffusion_millington_quirk(D0: float = 2.03e-9, porosity: float = 0.35) -> CurveData:
-        """
-        Generate Millington-Quirk curve: saturation → effective diffusion
-        
-        Parameters:
-        -----------
-        D0 : float
-            Molecular diffusion coefficient [m²/s]
-        porosity : float
-            Total porosity [-]
-        """
-        saturation = np.linspace(0.01, 1.0, 50)
-        theta = porosity * saturation
-        tau = theta**(10/3) / porosity**2
-        D_eff = D0 * tau
-        
-        return CurveData(saturation, D_eff, x_name="saturation", y_name="D_eff",
-                        units_x="-", units_y="m²/s")
-    
-    @staticmethod
-    def kd_vs_pH(contaminant: str = "zinc") -> CurveData:
-        """
-        pH-dependent sorption coefficient (example data)
-        
-        Parameters:
-        -----------
-        contaminant : str
-            'zinc', 'copper', 'lead'
-        """
-        pH = np.array([3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0])
-        
-        if contaminant.lower() == "zinc":
-            Kd = np.array([0.1, 0.5, 5.0, 50.0, 200.0, 500.0, 800.0])
-        elif contaminant.lower() == "copper":
-            Kd = np.array([1.0, 10.0, 100.0, 500.0, 1000.0, 2000.0, 3000.0])
-        elif contaminant.lower() == "lead":
-            Kd = np.array([10.0, 100.0, 1000.0, 5000.0, 10000.0, 15000.0, 20000.0])
-        else:
-            raise ValueError(f"Unknown contaminant: {contaminant}")
-        
-        return CurveData(pH, Kd, x_name="pH", y_name="Kd",
-                        units_x="-", units_y="L/kg")
-
-
-class GeophysicalCurves:
-    """Library of geophysical curves"""
-    
-    @staticmethod
-    def archie_conductivity(sigma_water: float = 0.1, porosity: float = 0.3, 
-                           m: float = 2.0, n: float = 2.0) -> CurveData:
-        """
-        Archie's law: saturation → electrical conductivity
-        σ = σ_water * φ^m * S^n
-        
-        Parameters:
-        -----------
-        sigma_water : float
-            Water conductivity [S/m]
-        porosity : float
-            Total porosity [-]
-        m, n : float
-            Cementation and saturation exponents
-        """
-        saturation = np.linspace(0.1, 1.0, 50)
-        sigma = sigma_water * porosity**m * saturation**n
-        
-        return CurveData(saturation, sigma, x_name="saturation", y_name="conductivity",
-                        units_x="-", units_y="S/m")

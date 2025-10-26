@@ -1,9 +1,6 @@
 from datetime import datetime, timedelta
-from firedrake import RectangleMesh, FunctionSpace
+from firedrake import FunctionSpace
 
-# Old imports (your existing modules)
-from physics import *
-from physics import domain
 from solver_V2 import *
 from visualization import *
 from setup import *
