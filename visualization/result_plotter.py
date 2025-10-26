@@ -10,7 +10,7 @@ from scipy.interpolate import LinearNDInterpolator, interp1d
 from datetime import datetime
 from tools.import_results import (
     load_comsol_data, load_measured_data, calculate_residuals, 
-    preview_data, DEFAULT_OFFSETS
+    preview_data
 )
 
 
@@ -40,182 +40,123 @@ class ResultsPlotter:
         self.probe_manager = probe_manager
         self.snapshot_manager = snapshot_manager
         self.rain_scenario = rain_scenario
-        self.domain = domain or (probe_manager.domain if probe_manager else None)
+        self.domain = domain
     
-    def preview_reference_data(self, comsol_data_file=None, measured_data_file=None, 
-                              comsol_ref_date=None, measured_ref_date=None, 
-                              measured_offset=0.0, figsize=(14, 8)):
-        """Preview reference data (COMSOL and/or measured) before plotting"""
-        comsol_data = None
-        measured_data = None
-        
-        # Load COMSOL data if provided
-        if comsol_data_file:
-            try:
-                # Calculate start_from for COMSOL data alignment
-                start_from = 0.0
-                if hasattr(self.config, 'start_datetime') and self.config.start_datetime and comsol_ref_date:
-                    start_from = (self.config.start_datetime - comsol_ref_date).total_seconds() / 86400.0
-                
-                comsol_data = load_comsol_data(
-                    comsol_data_file,
-                    start_from_days=start_from,
-                    sim_duration_days=None  # Load all available data for preview
-                )
-            except Exception as e:
-                print(f"⚠️  Could not load COMSOL data: {e}")
-        
-        # Load measured data if provided
-        if measured_data_file:
-            try:
-                # Set up offsets
-                offsets = DEFAULT_OFFSETS.copy()
-                if isinstance(measured_offset, dict):
-                    offsets.update(measured_offset)
-                else:
-                    for i in [101, 102, 103]:
-                        offsets[f"LTC {i}"] = measured_offset
-                
-                measured_data = load_measured_data(
-                    measured_data_file,
-                    time_converter=self.config.time_converter,
-                    start_datetime=None,  # Load all available data for preview
-                    end_datetime=None,
-                    offsets=offsets,
-                    smooth_window=4,
-                    hampel_window=5,
-                    hampel_sigma=3.0
-                )
-            except Exception as e:
-                print(f"⚠️  Could not load measured data: {e}")
-        
-        # Create preview plot
-        if comsol_data or measured_data:
-            fig = preview_data(
-                comsol_data=comsol_data,
-                measured_data=measured_data,
-                time_converter=getattr(self.config, 'time_converter', None),
-                figsize=figsize
-            )
-            return fig
-        else:
-            print("⚠️  No data to preview")
-            return None
     
-    def plot_complete_results(self, 
-                             filename=None, comsol_data_file=None, measured_data_file=None,
-                             plot_residuals=False, plot_dates=True,
-                             comsol_ref_date=None, measured_ref_date=None,
-                             measured_offset=0.0):
+    def plot_complete_results(self, filename=None, plot_dates=True, plotting_config=None):
         """
-        Create complete results figure
+        Create complete results figure with configurable plotting options
         
         Args:
-            probe_data: Dictionary from ProbeManager.get_data() (uses self.probe_manager if None)
-            snapshots: Dictionary from SnapshotManager.snapshots (uses self.snapshot_manager if None)
-            rain_scenario: Rain scenario for plotting (uses self.rain_scenario if None)
             filename: Output filename (optional)
-            comsol_data_file: Path to CSV with COMSOL modeled data
-            measured_data_file: Path to CSV with real measured data
-            plot_residuals: Whether to plot COMSOL residuals (auto-enabled if comsol_data_file provided)
             plot_dates: If True and config has time_converter, plot with datetime x-axis (default: True)
-            comsol_ref_date: Reference datetime for COMSOL t=0 (e.g., datetime(2024, 3, 3))
-            measured_ref_date: Reference datetime for measured data (auto-inferred from config if None)
-            measured_offset: Vertical offset to add to measured data in meters (e.g., 0.6 for 60cm)
+            plotting_config: Dictionary with plotting configuration:
+                {
+                    'time_series': True,                    # Always plot time series
+                    'plot_comsol_comparison': True,         # Plot COMSOL comparison and residuals
+                    'comsol_data_file': 'path/to/comsol.csv',
+                    'comsol_ref_date': datetime(2024, 2, 22),
+                    'plot_measured_comparison': True,       # Plot measured data comparison and residuals  
+                    'measured_data_file': 'path/to/measured.csv',
+                    'measured_ref_date': None,              # Auto-infer from config if None
+                    'measured_offsets': {'LTC 101': 0.6},   # or single float
+                    'plot_snapshots': True                  # Plot snapshots if snapshot_manager available
+                }
         """
-        probe_data = self.probe_manager.get_data() 
-        snapshots = self.snapshot_manager.snapshots if self.snapshot_manager else None
-        rain_scenario = self.rain_scenario if self.rain_scenario else None
-
-        """
-        if comsol_data_file is None :
-            comsol_data_file = self.config.data_input_dir / "RAF_COMSOL_PZ_CG.csv"
-        if comsol_ref_date is None :
-            comsol_ref_date = datetime(2024, 2, 22)  # COMSOL t=0 corresponds to February 22, 2024
-        if measured_data_file is None :
-            measured_data_file = self.config.data_input_dir / "MEASURED_PZ_CG.csv"
-        """
+        # Set default plotting config
+        default_config = {
+            'time_series': True,
+            'plot_comsol_comparison': False,
+            'plot_measured_comparison': False,
+            'plot_snapshots': True,
+            'field_name': 'water_table',           # Default field to plot
+            'field_units': 'm',                    # Default units
+            'field_label': 'Water Table Elevation', # Default label
+            'colormap': 'Blues'                    # Default colormap for snapshots
+        }
         
-        # Validate required data
+        if plotting_config is None:
+            plotting_config = default_config
+        else:
+            # Merge with defaults
+            for key, default_value in default_config.items():
+                if key not in plotting_config:
+                    plotting_config[key] = default_value
+        
+        # Get probe data (required)
+        probe_data = self.probe_manager.get_data() if self.probe_manager else None
         if probe_data is None:
-            raise ValueError("probe_data must be provided or probe_manager must be set in __init__")
-        # Calculate start_from automatically if we have datetime config
-        start_from = 0.0  # Default
-        if hasattr(self.config, 'start_datetime') and self.config.start_datetime and comsol_ref_date:
-            # Calculate days between comsol_ref_date and simulation start
-            start_from = (self.config.start_datetime - comsol_ref_date).total_seconds() / 86400.0
-            print(f"ℹ️  Auto-calculated start_from: {start_from:.1f} days "
-                  f"(from {comsol_ref_date.strftime('%Y-%m-%d')} to {self.config.start_datetime.strftime('%Y-%m-%d')})")
+            raise ValueError("probe_manager must be set and contain data")
         
-        # Auto-infer measured_ref_date from config if not provided
-        if measured_data_file and measured_ref_date is None:
-            if hasattr(self.config, 'start_datetime') and self.config.start_datetime:
-                measured_ref_date = self.config.start_datetime
-                print(f"ℹ️  Using config start_datetime as measured_ref_date: {measured_ref_date.strftime('%Y-%m-%d')}")
+        # Get snapshots if requested and available
+        snapshots = None
+        if plotting_config['plot_snapshots'] and self.snapshot_manager:
+            snapshots = self.snapshot_manager.snapshots
         
         # Determine if we can use datetime axis
         use_datetime = plot_dates and hasattr(self.config, 'time_converter') and self.config.time_converter is not None
         
-        # Load and align data if provided
+        # Load COMSOL data if requested
         comsol_data = None
-        measured_data = None
-        
-        if comsol_data_file:
-            # Load COMSOL data using utility function
+        if plotting_config['plot_comsol_comparison']:
             try:
+                # Calculate start_from automatically if we have datetime config
+                start_from = 0.0
+                if hasattr(self.config, 'start_datetime') and self.config.start_datetime:
+                    # Use provided ref_date or import_results default
+                    from tools.import_results import DEFAULT_COMSOL_REF_DATE
+                    comsol_ref_date = plotting_config.get('comsol_ref_date', DEFAULT_COMSOL_REF_DATE)
+                    start_from = (self.config.start_datetime - comsol_ref_date).total_seconds() / 86400.0
+                    print(f"ℹ️  Auto-calculated start_from: {start_from:.1f} days")
+                
+                # load_comsol_data will use default file if csv_path=None
                 comsol_data = load_comsol_data(
-                    comsol_data_file,
+                    csv_path=plotting_config.get('comsol_data_file'),
                     start_from_days=start_from,
                     sim_duration_days=probe_data['times'][-1] / 3600.0 / 24.0
                 )
-                # Auto-enable residuals if COMSOL data loaded
-                if comsol_data and not plot_residuals:
-                    plot_residuals = True
             except Exception as e:
                 print(f"⚠️  Could not load COMSOL data: {e}")
         
-        if measured_data_file:
-            # Set up individual piezometer offsets
-            offsets = DEFAULT_OFFSETS.copy()  # Start with defaults
-            if isinstance(measured_offset, dict):
-                # Dictionary of individual offsets: {"LTC 101": 0.6, "LTC 102": 0.65, ...}
-                offsets.update(measured_offset)
-            else:
-                # Single offset for all piezometers
-                for i in [101, 102, 103]:  # Standard piezometer IDs
-                    offsets[f"LTC {i}"] = measured_offset
-            
-            # Calculate simulation period for filtering
-            if measured_ref_date and hasattr(self.config, 'time_converter'):
-                # Calculate start and end datetime for measured data
-                sim_duration_days = probe_data['times'][-1] / 3600.0 / 24.0
-                start_datetime = measured_ref_date
-                end_datetime = measured_ref_date + pd.Timedelta(days=sim_duration_days)
-            else:
-                start_datetime = end_datetime = None
-            
-            # Load measured data using utility function
+        # Load measured data if requested
+        measured_data = None
+        if plotting_config['plot_measured_comparison']:
             try:
+                # Auto-infer ref_date from config if not provided
+                ref_date = plotting_config.get('measured_ref_date')
+                if ref_date is None and hasattr(self.config, 'start_datetime'):
+                    ref_date = self.config.start_datetime
+                    print(f"ℹ️  Using config start_datetime as measured_ref_date: {ref_date.strftime('%Y-%m-%d')}")
+                
+                # Calculate simulation period for filtering
+                start_datetime = end_datetime = None
+                if ref_date and hasattr(self.config, 'time_converter'):
+                    sim_duration_days = probe_data['times'][-1] / 3600.0 / 24.0
+                    start_datetime = ref_date
+                    end_datetime = ref_date + pd.Timedelta(days=sim_duration_days)
+                
+                # load_measured_data will use defaults if parameters are None
                 measured_data = load_measured_data(
-                    measured_data_file,
+                    csv_path=plotting_config.get('measured_data_file'),
                     time_converter=self.config.time_converter,
                     start_datetime=start_datetime,
                     end_datetime=end_datetime,
-                    offsets=offsets,
-                    smooth_window=30,  # Apply default smoothing
-                    hampel_window=120,  # Apply default outlier removal
+                    offsets=plotting_config.get('measured_offsets'),  # Will use default if None
+                    smooth_window=30,
+                    hampel_window=120,
                     hampel_sigma=3.0
                 )
             except Exception as e:
                 print(f"⚠️  Could not load measured data: {e}")
         
         # Calculate layout
-        n_rows = 1  # Time series
-        if plot_residuals:
-            if comsol_data:
-                n_rows += 1  # COMSOL residuals
-            if measured_data:
-                n_rows += 1  # Measured residuals
+        n_rows = 1  # Time series (always present)
+        
+        # Add residual rows if requested and data available
+        if plotting_config['plot_comsol_comparison'] and comsol_data is not None:
+            n_rows += 1
+        if plotting_config['plot_measured_comparison'] and measured_data is not None:
+            n_rows += 1
         if snapshots:
             n_rows += 2  # Snapshots (2 rows)
         
@@ -231,34 +172,31 @@ class ResultsPlotter:
         
         # Track current row and which is the last time-series row (for x-axis labels)
         current_row = 0
-        last_timeseries_row = 0 if not plot_residuals else (1 if comsol_data and not measured_data else 2)
+        last_timeseries_row = n_rows - (2 if snapshots else 0) - 1
         
         # Plot time series (row 0)
         is_last = (current_row == last_timeseries_row)
-        self._plot_time_series(fig, gs[current_row, :], probe_data, rain_scenario, 
-                              comsol_data, measured_data, show_xlabel=is_last,
+        self._plot_time_series(fig, gs[current_row, :], probe_data, self.rain_scenario, 
+                              comsol_data, measured_data, plotting_config, show_xlabel=is_last,
                               use_datetime=use_datetime)
         current_row += 1
         
         # Plot residuals if requested
-        if plot_residuals:
-            if comsol_data:
-                is_last = (current_row == last_timeseries_row)
-                self._plot_residuals(fig, gs[current_row, :], probe_data, comsol_data, 
-                                    'COMSOL', show_xlabel=is_last,
-                                    use_datetime=use_datetime)
-                current_row += 1
-            
-            if measured_data:
-                is_last = (current_row == last_timeseries_row)
-                self._plot_residuals(fig, gs[current_row, :], probe_data, measured_data,
-                                    'Measured', show_xlabel=is_last,
-                                    use_datetime=use_datetime)
-                current_row += 1
+        if plotting_config['plot_comsol_comparison'] and comsol_data is not None:
+            is_last = (current_row == last_timeseries_row)
+            self._plot_residuals(fig, gs[current_row, :], probe_data, comsol_data, 
+                                'COMSOL', plotting_config, show_xlabel=is_last, use_datetime=use_datetime)
+            current_row += 1
         
-        # Plot snapshots (rows after time series)
+        if plotting_config['plot_measured_comparison'] and measured_data is not None:
+            is_last = (current_row == last_timeseries_row)
+            self._plot_residuals(fig, gs[current_row, :], probe_data, measured_data,
+                                'Measured', plotting_config, show_xlabel=is_last, use_datetime=use_datetime)
+            current_row += 1
+        
+        # Plot snapshots if available and requested
         if snapshots:
-            self._plot_snapshots(fig, gs, snapshots, start_row=current_row,
+            self._plot_snapshots(fig, gs, snapshots, plotting_config, start_row=current_row,
                                use_datetime=use_datetime)
         
         # Save
@@ -271,9 +209,14 @@ class ResultsPlotter:
 
     
     def _plot_time_series(self, fig, gs_slice, probe_data, rain_scenario, 
-                         comsol_data, measured_data, show_xlabel=True, use_datetime=False):
-        """Plot water table time series"""
+                         comsol_data, measured_data, plotting_config, show_xlabel=True, use_datetime=False):
+        """Plot time series for specified field (water table or concentration)"""
         ax = fig.add_subplot(gs_slice)
+        
+        # Get field info from config
+        field_name = plotting_config['field_name']
+        field_units = plotting_config['field_units']
+        field_label = plotting_config['field_label']
         
         # Prepare time data
         times_sec = probe_data['times']
@@ -282,15 +225,28 @@ class ResultsPlotter:
         else:
             times_plot = times_sec / 3600.0  # Convert to hours
         
-        colors = ['#1f77b4', '#2ca02c', '#d62728']
+        # Generate enough colors for all probes
+        import matplotlib.pyplot as plt
+        num_probes = len(probe_data['data'])
+        
+        if num_probes <= 3:
+            colors = ['#1f77b4', '#2ca02c', '#d62728'][:num_probes]
+        else:
+            # Use matplotlib's default color cycle for more colors
+            prop_cycle = plt.rcParams['axes.prop_cycle']
+            colors = [prop_cycle.by_key()['color'][i % len(prop_cycle.by_key()['color'])] 
+                     for i in range(num_probes)]
         
         # Plot simulated data (Firedrake)
-        for i, (name, data) in enumerate(probe_data['data'].items()):
-            # Extract clean probe name (e.g., "LTC 1 (x=8.0m, y=1.0m)" -> "LTC 1")
-            clean_name = name.split('(')[0].strip()
-            ax.plot(times_plot, data, color=colors[i], linewidth=2.5, 
-                   label=f'{clean_name} - Firedrake simulation', marker='o', markersize=3, 
-                   markevery=max(1, len(times_plot)//30))
+        for i, (name, probe_fields) in enumerate(probe_data['data'].items()):
+            # Extract the requested field data from the probe fields
+            if field_name in probe_fields:
+                field_data = probe_fields[field_name]
+                # Extract clean probe name (e.g., "LTC 1 (x=8.0m, y=1.0m)" -> "LTC 1")
+                clean_name = name.split('(')[0].strip()
+                ax.plot(times_plot, field_data, color=colors[i], linewidth=2.5, 
+                       label=f'{clean_name} - Firedrake simulation', marker='o', markersize=3, 
+                       markevery=max(1, len(times_plot)//30))
         
         # Determine x-axis limits based on available data
         x_min = times_plot[0]
@@ -364,7 +320,7 @@ class ResultsPlotter:
                               alpha=0.15, color='lightblue', 
                               label='Rain event' if idx == 0 else '')
         
-        ax.set_ylabel('Water Table Elevation (m)', fontsize=12, fontweight='bold')
+        ax.set_ylabel(f'{field_label} ({field_units})', fontsize=12, fontweight='bold')
         if show_xlabel:
             if use_datetime:
                 ax.set_xlabel('Date', fontsize=12, fontweight='bold')
@@ -395,9 +351,12 @@ class ResultsPlotter:
                  loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=10)
     
     def _plot_residuals(self, fig, gs_slice, probe_data, reference_data, 
-                       reference_name, show_xlabel=True, use_datetime=False):
+                       reference_name, plotting_config, show_xlabel=True, use_datetime=False):
         """Plot residuals: Reference - Firedrake"""
         ax = fig.add_subplot(gs_slice)
+        
+        # Get field info from config
+        field_name = plotting_config['field_name']
         
         # Prepare simulation time data
         times_sec_sim = probe_data['times']
@@ -424,7 +383,7 @@ class ResultsPlotter:
                 continue
             
             # Get data
-            sim_data = np.array(probe_data['data'][probe_name])
+            sim_data = np.array(probe_data['data'][probe_name][field_name])
             ref_values = reference_data[ltc_name]
             
             # Interpolate simulation to reference times (need numeric values)
@@ -467,11 +426,16 @@ class ResultsPlotter:
         # Set x-limits to match reference data extent
         ax.set_xlim([times_ref[0], times_ref[-1]])
     
-    def _plot_snapshots(self, fig, gs, snapshots, start_row, use_datetime=False):
+    def _plot_snapshots(self, fig, gs, snapshots, plotting_config, start_row, use_datetime=False):
         """Plot spatial snapshots (6 plots in 2x3 grid)"""
         sorted_times = sorted(snapshots.keys())[:6]
         while len(sorted_times) < 6:
             sorted_times.append(sorted_times[-1])
+        
+        # Get field info from config
+        field_name = plotting_config['field_name']
+        field_label = plotting_config['field_label']
+        colormap = plotting_config['colormap']
         
         x_coords = self.coords[:, 0]
         y_coords = self.coords[:, 1]
@@ -481,15 +445,27 @@ class ResultsPlotter:
             col = idx % 3
             ax = fig.add_subplot(gs[row, col])
             
-            # Get saturation
-            sat = snapshots[t]['saturation'].dat.data[:]
-            sat = np.clip(sat, 0, 1)
-            
+            # Get field data (could be saturation, concentration, etc.)
+            if field_name == 'water_table':
+                # Special case: need to compute saturation from pressure
+                field_data = snapshots[t]['saturation'].dat.data[:]
+                field_data = np.clip(field_data, 0, 1)
+                vmin, vmax = 0, 1
+            else:
+                # General case: use the field directly
+                field_data = snapshots[t][field_name].dat.data[:]
+                
+                # Let matplotlib handle the range automatically
+                vmin, vmax = field_data.min(), field_data.max()
+                
+                # Only add small epsilon if vmin == vmax to avoid matplotlib error
+                if vmax == vmin:
+                    vmax = vmin + 1e-10
+
             # Interpolate to regular grid
-            domain = self.domain or (self.probe_manager.domain if self.probe_manager else None)
-            if domain:
-                xi = np.linspace(0, domain.Lx, 200)
-                yi = np.linspace(0, domain.Ly, 100)
+            if self.domain:
+                xi = np.linspace(0, self.domain.Lx, 200)
+                yi = np.linspace(0, self.domain.Ly, 100)
             else:
                 # Fall back to mesh bounds
                 x_coords = self.coords[:, 0]
@@ -498,22 +474,30 @@ class ResultsPlotter:
                 yi = np.linspace(y_coords.min(), y_coords.max(), 100)
             Xi, Yi = np.meshgrid(xi, yi)
             
-            interp = LinearNDInterpolator(np.column_stack((x_coords, y_coords)), sat)
+            interp = LinearNDInterpolator(np.column_stack((x_coords, y_coords)), field_data)
             Zi = interp(Xi, Yi)
             
-            # Plot
-            cf = ax.contourf(Xi, Yi, Zi, levels=np.linspace(0, 1, 25),
-                            cmap='Blues', vmin=0, vmax=1)
+            # Plot with appropriate levels and colormap
+            if field_name == 'water_table':
+                levels = np.linspace(0, 1, 25)
+            else:
+                # For concentration, use more levels for smoother appearance
+                levels = np.linspace(vmin, vmax, 50)
+                
+            cf = ax.contourf(Xi, Yi, Zi, levels=levels,
+                            cmap=colormap, vmin=vmin, vmax=vmax)
             
             if idx == 0:
                 contour_for_cbar = cf
             
-            # Monitoring points
-            if hasattr(self.config, 'probes_positions'):
+            # Monitoring points (plot probe positions)
+            if self.probe_manager and hasattr(self.probe_manager, 'probe_positions'):
                 colors = ['#1f77b4', '#2ca02c', '#d62728']
-                for i, (x, y) in enumerate(self.config.probes_positions):
-                    ax.plot(x, y, '*', color=colors[i], 
-                           markersize=12, markeredgecolor='black', markeredgewidth=0.8)
+                for i, (x, y) in enumerate(self.probe_manager.probe_positions):
+                    color = colors[i % len(colors)]  # Cycle through colors if more than 3 probes
+                    ax.plot(x, y, '*', color=color, 
+                           markersize=12, markeredgecolor='black', markeredgewidth=0.8,
+                           label=self.probe_manager.names[i] if i == 0 else "")  # Only label first for legend
             
             ax.set_xlabel('x (m)', fontsize=10)
             ax.set_ylabel('y (m)', fontsize=10)
@@ -527,10 +511,9 @@ class ResultsPlotter:
                 ax.set_title(f't = {t/3600:.1f}h', fontsize=11, fontweight='bold')
             
             ax.set_aspect('equal')
-            domain = self.domain or (self.probe_manager.domain if self.probe_manager else None)
-            if domain:
-                ax.set_xlim(0, domain.Lx)
-                ax.set_ylim(0, domain.Ly)
+            if self.domain:
+                ax.set_xlim(0, self.domain.Lx)
+                ax.set_ylim(0, self.domain.Ly)
             else:
                 # Use mesh bounds
                 x_coords = self.coords[:, 0]
@@ -538,7 +521,25 @@ class ResultsPlotter:
                 ax.set_xlim(x_coords.min(), x_coords.max())
                 ax.set_ylim(y_coords.min(), y_coords.max())
 
-        # Colorbar
+        # Colorbar with better formatting
         cbar_ax = fig.add_axes([0.92, 0.11, 0.02, 0.56])
         cbar = fig.colorbar(contour_for_cbar, cax=cbar_ax)
-        cbar.set_label('Saturation', fontsize=12, fontweight='bold')
+        cbar.set_label(f'{field_label}', fontsize=12, fontweight='bold')
+        
+        # Improve colorbar formatting based on field type
+        if field_name == 'concentration':
+            # Format concentration values nicely
+            import matplotlib.pyplot as plt
+            data_max = max([snapshots[t][field_name].dat.data[:].max() for t in sorted_times])
+            if data_max < 0.1:
+                # Very small values - use scientific notation
+                cbar.formatter.set_powerlimits((-3, -1))
+                cbar.update_ticks()
+            elif data_max < 10:
+                # Small values - use 2 decimal places
+                cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
+            else:
+                # Larger values - use 1 decimal place
+                cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.1f'))
+        
+        cbar.ax.tick_params(labelsize=10)

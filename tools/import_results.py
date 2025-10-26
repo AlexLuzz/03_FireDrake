@@ -22,6 +22,16 @@ DEFAULT_OFFSETS = {
     'LTC 103': 0.0,
 }
 
+# Default data file paths (edit these as needed)
+DEFAULT_COMSOL_FILE = Path("./data_input/RAF_COMSOL_PZ_CG.csv")
+DEFAULT_MEASURED_FILE = Path("./data_input/MEASURED_PZ_CG.csv")
+DEFAULT_COMSOL_REF_DATE = datetime(2024, 2, 22)  # COMSOL t=0 reference date
+DEFAULT_MEASURED_OFFSETS = {
+    'LTC 101': 0.60,
+    'LTC 102': 0.70, 
+    'LTC 103': 0.35,
+}
+
 
 def hampel_filter(data: np.ndarray, window_size: int = 5, n_sigma: float = 3.0) -> np.ndarray:
     """
@@ -48,14 +58,20 @@ def hampel_filter(data: np.ndarray, window_size: int = 5, n_sigma: float = 3.0) 
     return filtered
 
 
-def load_comsol_data(csv_path: Union[str, Path], 
+def load_comsol_data(csv_path: Union[str, Path] = None, 
                      start_from_days: float = 0.0, 
                      sim_duration_days: Optional[float] = None) -> Dict:
     """
     Load COMSOL simulation results
     
+    Args:
+        csv_path: Path to COMSOL CSV file (uses DEFAULT_COMSOL_FILE if None)
+        
     Returns dict with 'times' (days) and LTC columns
     """
+    if csv_path is None:
+        csv_path = DEFAULT_COMSOL_FILE
+        
     loader = CSVLoader(str(csv_path))
     
     # Find time column
@@ -85,8 +101,8 @@ def load_comsol_data(csv_path: Union[str, Path],
     return result
 
 
-def load_measured_data(csv_path: Union[str, Path],
-                      time_converter: TimeConverter,
+def load_measured_data(csv_path: Union[str, Path] = None,
+                      time_converter: TimeConverter = None,
                       start_datetime: Optional[datetime] = None,
                       end_datetime: Optional[datetime] = None,
                       offsets: Optional[Dict[str, float]] = None,
@@ -97,15 +113,18 @@ def load_measured_data(csv_path: Union[str, Path],
     Load field measurement data with filtering and smoothing
     
     Args:
+        csv_path: Path to measured CSV file (uses DEFAULT_MEASURED_FILE if None)
+        offsets: Custom offsets dict (uses DEFAULT_MEASURED_OFFSETS if None)
         smooth_window: Sliding window for smoothing (0 to disable)
         hampel_window: Window for Hampel filter (0 to disable)
         hampel_sigma: Outlier threshold in sigmas
-        offsets: Custom offsets dict (uses DEFAULT_OFFSETS if None)
     
     Returns dict with 'times' (days), 'datetimes', and LTC columns
     """
+    if csv_path is None:
+        csv_path = DEFAULT_MEASURED_FILE
     if offsets is None:
-        offsets = DEFAULT_OFFSETS
+        offsets = DEFAULT_MEASURED_OFFSETS
     
     # Find datetime column
     loader_temp = CSVLoader(str(csv_path))

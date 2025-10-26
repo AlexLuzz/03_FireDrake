@@ -24,8 +24,8 @@ def main_transport():
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 15),
-        dt_td=timedelta(hours=12)  # Shorter timestep for transport
+        end_datetime=datetime(2024, 5, 10),
+        dt_td=timedelta(hours=2)  # Smaller timestep for smoother transport curves
     )
     
     # ==========================================
@@ -62,23 +62,14 @@ def main_transport():
         y_max=5.0,
         multiplier=1.0
     )
-    
-    # Add chloride application events
-    # Simulate 3 de-icing salt applications over the simulation period
-    applications = [
-        {'start': 0.0, 'duration': 2.0, 'rate': 0.1},      # Day 1: 0.1 kg/m²/hr for 2 hours
-        {'start': 120.0, 'duration': 3.0, 'rate': 0.15},   # Day 6: 0.15 kg/m²/hr for 3 hours
-        {'start': 240.0, 'duration': 2.0, 'rate': 0.12},   # Day 11: 0.12 kg/m²/hr for 2 hours
-    ]
-    
-    for i, app in enumerate(applications):
-        chloride_source.add_event(
-            name=f"chloride_app_{i}",
-            start=app['start'],
-            end=app['start'] + app['duration'],
-            rate=app['rate'],
-            zones="deicing_zone"
-        )
+
+    chloride_source.add_event(
+        name="deicing_zone",
+        start=config.t_end_hours*0.05,
+        end=config.t_end_hours*0.1,
+        rate=1000.0,  # Massive rate to test if source is working
+        zones="deicing_zone"
+    )
     
     print(f"✓ Created {len(chloride_source.events)} chloride application events")
     
@@ -141,7 +132,6 @@ def main_transport():
         config=config
     )
     
-    
     # ==========================================
     # 9. TRANSPORT SOLVER (with Chloride Source)
     # ==========================================
@@ -152,7 +142,8 @@ def main_transport():
         pressure_solver=richards,
         bc_manager=None,  # No transport BCs for now
         transport_source=chloride_source,  # Chloride affects transport
-        config=config
+        config=config,
+        debug=False  # Enable debug to see what's happening
     )
     
     # Set initial concentration (clean everywhere)
@@ -164,17 +155,39 @@ def main_transport():
     # 10. MONITORING SETUP
     # ==========================================
     # Probe manager for chloride concentration monitoring
-    probe_manager = ProbeManager(domain.mesh)
+    # Place probes strategically to monitor chloride plume:
+    # - One at the source zone (top of GI)
+    # - One in the middle of the GI zone  
+    # - One at the bottom to see infiltration
+    # - One outside the GI zone for comparison
+    chloride_probe_positions = [
+        [10.0, 4.8],   # Near source zone (top of GI)
+        [10.0, 3.0],   # Middle of GI zone
+        [10.0, 1.5],   # Lower in domain (infiltration path)
+        [7.0, 1.5],    # Outside GI zone (control point)
+    ]
+    chloride_probe_names = [
+        "Source_Zone", 
+        "GI_Middle", 
+        "Deep_Infiltration", 
+        "Control_Point"
+    ]
+    
+    probe_manager = ProbeManager(
+        domain.mesh, 
+        probe_positions=chloride_probe_positions,
+        names=chloride_probe_names
+    )
     
     # Snapshot manager for concentration field visualization
     snapshot_times = [
         0.0,
-        2*3600.0,      # After first chloride application
-        5*3600.0,      # Day 1
-        24*3600.0,     # Day 2
-        120*3600.0,    # After second application
-        240*3600.0,    # After third application
-        config.t_end   # Final time
+        config.t_end * 0.1,      # After first chloride application
+        config.t_end * 0.2,      # Day 1
+        config.t_end * 0.3,      # Day 2
+        config.t_end * 0.5,      # After second application
+        config.t_end * 0.7,      # After third application
+        config.t_end             # Final time
     ]
     snapshot_manager = SnapshotManager(snapshot_times)
     
@@ -195,34 +208,33 @@ def main_transport():
     # ==========================================
     now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
-    # Get probe data and extract concentration for plotting
-    probe_data_raw = probe_manager.get_data()
+    # Create chloride-specific plotter
+    plotter = ResultsPlotter(
+        config, domain.mesh, 
+        probe_manager=probe_manager, 
+        rain_scenario=rain_source,  # Show rain events for context
+        domain=domain,
+        snapshot_manager=snapshot_manager
+    )
     
-    # Convert nested probe data to flat structure for concentration plotting
-    concentration_data = {}
-    for probe_name, fields in probe_data_raw['data'].items():
-        if 'concentration' in fields:
-            concentration_data[probe_name] = fields['concentration']
-    
-    # Create plotting-compatible data structure
-    plot_data = {
-        'times': probe_data_raw['times'],
-        'data': concentration_data
+    # Configure chloride-specific plotting (no COMSOL/measured comparisons for chloride)
+    plotting_config = {
+        'time_series': True,
+        'plot_comsol_comparison': False,    # No chloride reference data available
+        'plot_measured_comparison': False,  # No chloride reference data available
+        'plot_snapshots': True,             # Show chloride concentration plumes
+        'field_name': 'concentration',      # Monitor concentration instead of water table
+        'field_units': 'mg/L',              # Concentration units
+        'field_label': 'Chloride Concentration',
+        'colormap': 'Spectral_r'            # Meaningful colormap for concentration
     }
     
-    import matplotlib.pyplot as plt
-    plt.figure(figsize=(12, 6))
-    for probe_name, conc_values in concentration_data.items():
-        times_days = [t / 86400.0 for t in probe_data_raw['times']]
-        plt.plot(times_days, conc_values, label=probe_name)
-
-    plt.xlabel("Time (days)")
-    plt.ylabel("Chloride Concentration (mg/L)")
-    plt.title("Chloride Transport Over Time")
-    plt.legend()
-    plt.grid()
-    plt.savefig(f"chloride_transport_{now}.png")
-    plt.close()
+    plotter.plot_complete_results(
+        filename=config.output_dir / f'chloride_transport_{now}.png',
+        plotting_config=plotting_config
+    )
+    
+    print(f"✓ Chloride visualization saved")
 
 if __name__ == "__main__":
     main_transport()

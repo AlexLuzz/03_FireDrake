@@ -18,8 +18,8 @@ def main():
     config = SimulationConfig(
         name="Datetime_Duration",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 15),
-        dt_td=timedelta(hours=4)
+        end_datetime=datetime(2024, 5, 30),
+        dt_td=timedelta(hours=6)
     )
     
     # ==========================================
@@ -80,7 +80,7 @@ def main():
         config.t_end * 0.7,
         config.t_end
     ]
-    snapshot_manager = SnapshotManager(snapshot_times, field_map)
+    snapshot_manager = SnapshotManager(snapshot_times)
     
     # ==========================================
     # 9. SOLVER (now receives field_map!)
@@ -105,18 +105,32 @@ def main():
     now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     plotter = ResultsPlotter(
-        config, domain.mesh, probe_manager, rain_source, field_map
+        config, domain.mesh, 
+        probe_manager=probe_manager, 
+        rain_scenario=rain_source, 
+        domain=domain,
+        snapshot_manager=snapshot_manager
     )
     
-    measured_offsets = {
-        "LTC 101": 0.60,
-        "LTC 102": 0.70,
-        "LTC 103": 0.35
+    # Configure what to plot
+    plotting_config = {
+        'time_series': True,
+        'plot_comsol_comparison': True,     # Uses default COMSOL file from import_results.py
+        'plot_measured_comparison': True,   # Uses default measured file from import_results.py
+        'plot_snapshots': False              # Will plot if snapshot_manager has data
     }
+    
+    # Optional: Override defaults if needed
+    # plotting_config.update({
+    #     'comsol_data_file': 'path/to/other/comsol.csv',
+    #     'comsol_ref_date': datetime(2024, 3, 1),
+    #     'measured_data_file': 'path/to/other/measured.csv', 
+    #     'measured_offsets': {"LTC 101": 0.5, "LTC 102": 0.6, "LTC 103": 0.4},
+    # })
     
     plotter.plot_complete_results(
         filename=config.output_dir / f'rain_simulation_{now}.png',
-        measured_offset=measured_offsets
+        plotting_config=plotting_config
     )
     
 if __name__ == "__main__":

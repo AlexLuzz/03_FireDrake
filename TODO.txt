@@ -3,9 +3,7 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [ ] Update ProbeManager and snapshotManager to be more versatile to compute chloride concentration or conductivity for example
-    - [ ] Update boundary condition managers for darcy velocity and transport computation
-    - [ ] Correct Result plotter : as is can't not plos measured and comsol ...
+    - [ ] complete the helper to define chloride source
 
     ## Medium Priority ⚡
     - [ ]     
@@ -17,6 +15,9 @@
 
 
 ## ✅ Completed
+- [x] Correct Result plotter : as is can't not plot measured and comsol ...
+- [x] Update ProbeManager and snapshotManager to be more versatile to compute 
+    chloride concentration or conductivity for example
 - [x] Improve physics architecture, i.e. better separation between domain, materials and equations
 - [x] Implement Hampel filtering for measured data, resave the csv after
 - [x] Implement building rain_scenarios from meteostat (will it match measured data better ?)

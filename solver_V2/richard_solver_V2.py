@@ -60,10 +60,16 @@ class RichardsSolver:
         print("Starting simulation...")
         print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
         
+        # Record initial conditions (t=0)
         if probe_manager is not None:
-            probe_manager.record_initial(self.p_n)
+            probe_manager.record(0.0, self.p_n, "pressure")
+            probe_manager.record_water_table(0.0, self.p_n)
         if snapshot_manager is not None:
-            snapshot_manager.record_initial(self.p_n)
+            if snapshot_manager.should_record(0.0, self.config.dt):
+                snapshot_manager.record(0.0, self.p_n, "pressure")
+                # Also record initial saturation
+                Se = self.field_map.compute_saturation_field(self.p_n)
+                snapshot_manager.record(0.0, Se, "saturation")
 
         t = 0.0
         for step in range(self.config.num_steps):

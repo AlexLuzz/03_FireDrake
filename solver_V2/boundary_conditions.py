@@ -182,7 +182,7 @@ class BoundaryConditionManager:
         bc_right = DirichletBC(self.V, self.hydrostatic_profile, 2)
         bcs.extend([bc_left, bc_right])
         
-        # Bottom boundary: free drainage (no Dirichlet BC)
+        # Bottom boundary: free drainage 
         # If you need Dirichlet at bottom, uncomment:
         # bc_bottom = DirichletBC(self.V, Constant(0), 3)
         # bcs.append(bc_bottom)
