@@ -4,7 +4,7 @@ Handles extraction of property fields for use in solvers
 """
 import numpy as np
 from typing import Dict, Optional, Callable
-from materials import Material
+from .materials import Material
 
 # ==============================================
 # MATERIAL FIELD MAPPING
@@ -279,27 +279,65 @@ class MaterialField:
         
         return Cm_field
     
-    def get_Se_field(self, pressure_field: np.ndarray) -> np.ndarray:
+    def compute_saturation_field(self, pressure_field):
         """
-        Get effective saturation field
-        Se = (θ - θr) / (θs - θr)
+        Compute effective saturation field from pressure field
         
         Parameters:
         -----------
-        pressure_field : np.ndarray
+        pressure_field : firedrake.Function
             Pressure head field [m]
-        
+
         Returns:
         --------
-        Se_field : np.ndarray [-]
+        saturation_field : firedrake.Function
+            Effective saturation field [-]
         """
-        Se_field = np.zeros_like(pressure_field)
+        # Get pressure data array from Firedrake Function
+        pressure_data = pressure_field.dat.data[:]
         
+        # Initialize saturation data array
+        saturation_data = np.zeros_like(pressure_data)
+        
+        # Get mesh coordinates for DOF mapping
+        mesh = pressure_field.function_space().mesh()
+        coords = mesh.coordinates.dat.data[:]
+        
+        # For each region, find which DOFs belong to it and compute saturation
         for region_name, material in self.assignments.items():
-            mask = self.domain.regions[region_name]
-            Se_field[mask] = np.vectorize(material.Se)(pressure_field[mask])
+            # Get the 2D mask from domain regions
+            region_mask_2d = self.domain.regions[region_name]
+            
+            # Find DOFs that fall within this region
+            # This is a simplified approach - for more complex cases you might need
+            # a more sophisticated DOF-to-region mapping
+            x_coords = coords[:, 0]
+            y_coords = coords[:, 1]
+            
+            # Create 1D mask for DOFs by checking if coordinates fall in region
+            # We need to interpolate the 2D region mask to the DOF locations
+            from scipy.interpolate import RegularGridInterpolator
+            
+            # Create interpolator for the region mask
+            x_grid = np.linspace(0, self.domain.Lx, self.domain.nx)
+            y_grid = np.linspace(0, self.domain.Ly, self.domain.ny)
+            interpolator = RegularGridInterpolator(
+                (y_grid, x_grid), region_mask_2d.astype(float),
+                method='nearest', bounds_error=False, fill_value=0
+            )
+            
+            # Evaluate region mask at DOF coordinates
+            dof_coords = np.column_stack([y_coords, x_coords])
+            region_mask_1d = interpolator(dof_coords) > 0.5
+            
+            # Apply material law to DOFs in this region
+            saturation_data[region_mask_1d] = np.vectorize(material.Se)(pressure_data[region_mask_1d])
+
+        # Create new Firedrake Function for saturation
+        saturation_field = pressure_field.copy(deepcopy=True)
+        saturation_field.dat.data[:] = saturation_data
         
-        return Se_field
+        return saturation_field
     
     def compute_all_hydraulic_fields(self, pressure_field: np.ndarray) -> Dict[str, np.ndarray]:
         """
@@ -460,3 +498,20 @@ class MaterialField:
     
     def __repr__(self):
         return f"MaterialField({len(self.assignments)} regions assigned)"
+
+    def get_material_at_point(self, x: float, y: float):
+        """
+        Get material at continuous spatial coordinates
+        (for Firedrake mesh nodes)
+        """
+        for region_name, material in self.assignments.items():
+            mask = self.domain.regions[region_name]
+            
+            # Find if point (x,y) is in this region
+            i = np.argmin(np.abs(self.domain.x - x))
+            j = np.argmin(np.abs(self.domain.y - y))
+            
+            if mask[j, i]:
+                return material
+        
+        raise ValueError(f"No material at ({x}, {y})")

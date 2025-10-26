@@ -5,7 +5,7 @@ Includes Van Genuchten analytical model and curve-based empirical model
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import numpy as np
-from curve_tools import CurveData, CurveInterpolator, HydraulicCurves
+from .curve_tools import CurveData, CurveInterpolator, HydraulicCurves
 
 # ==============================================
 # ABSTRACT BASE CLASS

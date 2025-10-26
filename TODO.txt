@@ -10,7 +10,7 @@
     ## Medium Priority ⚡
     - [ ] Better implementation of equation setup and solving, i.e. richards solver and building 
       should be separated
-    - [ ] Implement Hampel filtering for measured data, resave the csv after
+    
     - [ ] Implement test script with ANALYTICAL solution for validation
 
     ## Low Priority 💡
@@ -19,6 +19,7 @@
 
 
 ## ✅ Completed
+- [x] Implement Hampel filtering for measured data, resave the csv after
 - [x] Implement building rain_scenarios from meteostat (will it match measured data better ?)
         -> YES KINDA WORK BETTER, NEED TO FIND THE PROPER STATION I THINK
 - [x] Clean former rain_scenario

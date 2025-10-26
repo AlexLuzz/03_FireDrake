@@ -2,81 +2,48 @@
 Richards equation solver using new architecture
 """
 from firedrake import (
-    Function, TrialFunction, TestFunction, Constant, SpatialCoordinate,
-    dx, ds, lhs, rhs, solve, conditional, And, as_vector, grad, dot,
-    RectangleMesh, FunctionSpace
+    Function, TrialFunction, TestFunction, dx, ds, lhs, rhs, solve,
+    as_vector, grad, dot
 )
 import numpy as np
 
 class RichardsSolver:
-    """
-    Richards equation solver: Cm * ∂Hp/∂t - ∇·(K * ∇Hp) = sources
-    """
-
     def __init__(self, mesh, V, field_map, source_scenario, bc_manager, config):
-        """
-        Args:
-            mesh: Firedrake mesh
-            V: Function space
-            field_map: MaterialField object (links domain to materials)
-            source_scenario: SourceScenario (rain/sources)
-            bc_manager: BoundaryConditionManager
-            config: SimulationConfig
-        """
         self.mesh = mesh
         self.V = V
         self.field_map = field_map
-        self.domain = field_map.domain
         self.source_scenario = source_scenario
         self.bc_manager = bc_manager
         self.config = config
         
-        # Solution functions
         self.p_n = Function(V, name="Pressure_old")
         self.p_new = Function(V, name="Pressure")
-        
-        # Coefficient fields
         self.Cm_n = Function(V, name="Moisture_capacity")
         self.kr_n = Function(V, name="Relative_permeability")
         self.Ks_field = Function(V, name="Saturated_conductivity")
         
-        # Initialize Ks (static, computed once)
         self._set_Ks_field()
-        
-        # Initialize pressure
         self._set_initial_conditions()
     
     def _set_Ks_field(self):
-        """Set saturated conductivity field (static)"""
+        """Set Ks (static, once)"""
         coords = self.mesh.coordinates.dat.data
         Ks_vals = np.zeros(len(coords))
         
         for i, (x, y) in enumerate(coords):
-            material = self._get_material_at_point(x, y)
+            material = self.field_map.get_material_at_point(x, y)
             Ks_vals[i] = material.Ks
         
         self.Ks_field.dat.data[:] = Ks_vals
     
     def _set_initial_conditions(self):
-        """Set initial hydrostatic pressure"""
         coords = self.mesh.coordinates.dat.data
-        y_coords = coords[:, 1]
         water_table = self.bc_manager.H0_initial
-        
-        initial_pressure = water_table - y_coords
-        self.p_n.dat.data[:] = initial_pressure
-        
+        self.p_n.dat.data[:] = water_table - coords[:, 1]
         self._update_coefficients()
     
-    def _get_material_at_point(self, x: float, y: float):
-        """Get material at spatial point using field_map"""
-        # Find closest grid point in domain
-        i = np.argmin(np.abs(self.domain.x - x))
-        j = np.argmin(np.abs(self.domain.y - y))
-        return self.field_map.get_material_at(j, i)  # Note: j, i for (ny, nx) indexing
-    
     def _update_coefficients(self):
-        """Update Cm and kr based on current pressure"""
+        """Update Cm and kr - ONE method call to field_map!"""
         coords = self.mesh.coordinates.dat.data
         p_vals = self.p_n.dat.data[:]
         
@@ -84,17 +51,15 @@ class RichardsSolver:
         kr_vals = np.zeros(len(coords))
         
         for i, (x, y) in enumerate(coords):
-            material = self._get_material_at_point(x, y)
-            Hp = p_vals[i]
-            
-            Cm_vals[i] = material.dtheta_dp(Hp)
-            kr_vals[i] = material.kr(Hp)
+            material = self.field_map.get_material_at_point(x, y)
+            Cm_vals[i] = material.dtheta_dp(p_vals[i])
+            kr_vals[i] = material.kr(p_vals[i])
         
         self.Cm_n.dat.data[:] = Cm_vals
         self.kr_n.dat.data[:] = kr_vals
 
     def solve_timestep(self, t: float):
-        """Solve one time step"""
+        """Solve one timestep - pure numerical work, no material logic"""
         self._update_coefficients()
         
         bcs = self.bc_manager.get_dirichlet_bcs(t)
@@ -128,19 +93,16 @@ class RichardsSolver:
         
         if probe_manager is not None:
             probe_manager.record_initial(self.p_n)
-
         if snapshot_manager is not None:
             snapshot_manager.record_initial(self.p_n)
 
         t = 0.0
         for step in range(self.config.num_steps):
             t += self.config.dt
-            
             self.solve_timestep(t)
             
             if probe_manager is not None:
                 probe_manager.record(t, self.p_new)
-
             if snapshot_manager is not None:
                 if snapshot_manager.should_record(t, self.config.dt):
                     snapshot_manager.record(t, self.p_new)
@@ -155,15 +117,3 @@ class RichardsSolver:
                       end='', flush=True)
         
         print("\n\nSimulation complete!")
-        
-        if probe_manager is not None:
-            probe_data = probe_manager.get_data()
-            print(f"  Total time steps: {len(probe_data['times'])}")
-            for name, data in probe_data['data'].items():
-                try:
-                    data_array = np.array(data, dtype=float)
-                    valid_data = data_array[~np.isnan(data_array)]
-                    if len(valid_data) > 0:
-                        print(f"  {name}: {valid_data.min():.3f}m - {valid_data.max():.3f}m")
-                except (ValueError, TypeError):
-                    pass

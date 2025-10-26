@@ -6,18 +6,18 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 import numpy as np
 
-from hydraulic_models import (
+from .hydraulic_models import (
     HydraulicModel, 
     VanGenuchtenModel, 
     VanGenuchtenParams,
     CurveBasedHydraulicModel
 )
-from transport_models import (
+from .transport_models import (
     TransportModel,
     CurveBasedTransportModel,
     TransportProperties
 )
-from curve_tools import HydraulicCurves
+from .curve_tools import HydraulicCurves
 
 # ==============================================
 # MATERIAL CLASS

@@ -3,10 +3,9 @@ Transport models for solute transport
 Includes analytical and curve-based approaches
 """
 from dataclasses import dataclass
-from abc import ABC, abstractmethod
 import numpy as np
 from typing import Optional
-from curve_tools import CurveData, CurveInterpolator, TransportCurves
+from .curve_tools import CurveData, CurveInterpolator, TransportCurves
 
 # ==============================================
 # CONTAMINANT DATABASE
