@@ -374,3 +374,25 @@ class CurveBasedHydraulicModel(HydraulicModel):
             kr_curve = kr_curve.smooth(smooth_window)
         
         return cls(theta_curve, kr_curve, **kwargs)
+
+# ==============================================
+# MATERIAL FACTORIES (convenience functions)
+# ==============================================
+
+def till(Ks=9e-6):
+    """Till material: (HydraulicModel, Ks)"""
+    return CurveBasedHydraulicModel.from_library("till"), Ks
+
+def terreau(Ks=4e-5):
+    """Terreau material: (HydraulicModel, Ks)"""
+    return CurveBasedHydraulicModel.from_library("terreau"), Ks
+
+def sand(Ks=1e-4):
+    """Sand material: (HydraulicModel, Ks)"""
+    vg = VanGenuchtenParams(theta_r=0.045, theta_s=0.35, alpha=14.5, n=2.68)
+    return VanGenuchtenModel(vg), Ks
+
+def clay(Ks=1e-9):
+    """Clay material: (HydraulicModel, Ks)"""
+    vg = VanGenuchtenParams(theta_r=0.068, theta_s=0.38, alpha=0.8, n=1.09)
+    return VanGenuchtenModel(vg), Ks

@@ -3,6 +3,7 @@ from firedrake import RectangleMesh, FunctionSpace
 
 # Old imports (your existing modules)
 from physics import *
+from physics import domain
 from solver_V2 import *
 from visualization import *
 from setup import *
@@ -20,7 +21,7 @@ def main():
     config = SimulationConfig(
         name="Datetime_Duration",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 6, 30),
+        end_datetime=datetime(2024, 5, 15),
         dt_td=timedelta(hours=4)
     )
     
@@ -43,34 +44,21 @@ def main():
     # ==========================================
     # 3. GEOMETRY (Domain - pure geometry)
     # ==========================================
-    Lx, Ly = 20.0, 5.0
-    nx, ny = 80, 40
-    
-    domain = Domain(nx=nx, ny=ny, Lx=Lx, Ly=Ly)
-    domain.add_layer("base", 0.0, 5.0)
-    domain.add_rectangle("green_infrastructure", 
-                        x_min=9.0, x_max=11.0, 
-                        y_min=4.0, y_max=5.0)
+    domain = Domain(nx=80, ny=40, Lx=20.0, Ly=5.0)
+    domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
     
     # ==========================================
     # 4. MATERIALS (properties)
     # ==========================================
-    till = Material.library_till()
-    terreau = Material.library_terreau()
+    domain.assign("base", till())
+    domain.assign("GI", terreau())
+    domain.validate()
     
     # ==========================================
     # 5. MAPPING (connect materials to domain)
     # ==========================================
-    field_map = MaterialField(domain)
-    field_map.assign("base", till)
-    field_map.assign("green_infrastructure", terreau)
-    field_map.validate()
-    
-    # ==========================================
-    # 6. FIREDRAKE MESH & FUNCTION SPACE
-    # ==========================================
-    mesh = RectangleMesh(nx, ny, Lx, Ly)
-    V = FunctionSpace(mesh, "CG", 1)
+    V = FunctionSpace(domain.mesh, "CG", 1)
+    field_map = MaterialField(domain, V)
     
     # ==========================================
     # 7. BOUNDARY CONDITIONS
@@ -85,7 +73,7 @@ def main():
     # ==========================================
     # 8. MONITORING
     # ==========================================
-    probe_manager = ProbeManager(mesh)
+    probe_manager = ProbeManager(domain.mesh)
     
     snapshot_times = [
         0.0,
@@ -101,7 +89,7 @@ def main():
     # 9. SOLVER (now receives field_map!)
     # ==========================================
     solver = RichardsSolver(
-        mesh=mesh,
+        domain=domain,
         V=V,
         field_map=field_map,  # NEW: field_map instead of domain
         source_scenario=rain_source,
@@ -120,7 +108,7 @@ def main():
     now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     plotter = ResultsPlotter(
-        config, mesh, probe_manager, rain_source, field_map
+        config, domain.mesh, probe_manager, rain_source, field_map
     )
     
     measured_offsets = {
