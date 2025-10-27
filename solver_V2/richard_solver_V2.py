@@ -22,7 +22,7 @@ class RichardsSolver:
     
     def _set_initial_conditions(self):
         coords = self.mesh.coordinates.dat.data_ro
-        water_table = self.bc_manager.H0_initial
+        water_table = self.bc_manager.left_wt_0
         self.p_n.dat.data[:] = water_table - coords[:, 1]
     
     def solve_timestep(self, t: float):

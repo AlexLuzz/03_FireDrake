@@ -18,7 +18,7 @@ def main():
     config = SimulationConfig(
         name="Datetime_Duration",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 30),
+        end_datetime=datetime(2024, 5, 10),
         dt_td=timedelta(hours=6)
     )
     
@@ -62,9 +62,8 @@ def main():
     # ==========================================
     bc_manager = BoundaryConditionManager(
         V,
-        initial_water_table=1.2,
-        water_table_trend=None,
-        time_converter=config.time_converter
+        left_wt=1.2,
+        right_wt=1.8
     )
     
     # ==========================================
@@ -115,9 +114,9 @@ def main():
     # Configure what to plot
     plotting_config = {
         'time_series': True,
-        'plot_comsol_comparison': True,     # Uses default COMSOL file from import_results.py
-        'plot_measured_comparison': True,   # Uses default measured file from import_results.py
-        'plot_snapshots': False              # Will plot if snapshot_manager has data
+        'plot_comsol_comparison': False,     # Uses default COMSOL file from import_results.py
+        'plot_measured_comparison': False,   # Uses default measured file from import_results.py
+        'plot_snapshots': True              # Will plot if snapshot_manager has data
     }
     
     # Optional: Override defaults if needed

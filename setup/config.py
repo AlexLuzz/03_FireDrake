@@ -41,8 +41,8 @@ class SimulationConfig:
     solver_type: str = 'gmres'
     preconditioner: str = 'hypre'  # 'ilu' for small, 'hypre' for large
     preconditioner_type: str = 'boomeramg'
-    rtol: float = 1e-5
-    atol: float = 1e-7
+    rtol: float = 1e-4
+    atol: float = 1e-5
     max_iter: int = 100
     
     @property

@@ -440,6 +440,24 @@ class ResultsPlotter:
         x_coords = self.coords[:, 0]
         y_coords = self.coords[:, 1]
         
+        # Calculate global vmin/vmax across all snapshots for consistent colorbar
+        all_data = []
+        for t in sorted_times:
+            if field_name == 'water_table':
+                field_data = snapshots[t]['saturation'].dat.data[:]
+                field_data = np.clip(field_data, 0, 1)
+            else:
+                field_data = snapshots[t][field_name].dat.data[:]
+            all_data.extend(field_data.flatten())
+        
+        if field_name == 'water_table':
+            vmin_global, vmax_global = 0, 1
+        else:
+            vmin_global, vmax_global = np.min(all_data), np.max(all_data)
+            # Ensure we have a valid range
+            if vmax_global == vmin_global:
+                vmax_global = vmin_global + 1e-10
+        
         for idx, t in enumerate(sorted_times):
             row = start_row + idx // 3
             col = idx % 3
@@ -450,17 +468,9 @@ class ResultsPlotter:
                 # Special case: need to compute saturation from pressure
                 field_data = snapshots[t]['saturation'].dat.data[:]
                 field_data = np.clip(field_data, 0, 1)
-                vmin, vmax = 0, 1
             else:
                 # General case: use the field directly
                 field_data = snapshots[t][field_name].dat.data[:]
-                
-                # Let matplotlib handle the range automatically
-                vmin, vmax = field_data.min(), field_data.max()
-                
-                # Only add small epsilon if vmin == vmax to avoid matplotlib error
-                if vmax == vmin:
-                    vmax = vmin + 1e-10
 
             # Interpolate to regular grid
             if self.domain:
@@ -481,11 +491,11 @@ class ResultsPlotter:
             if field_name == 'water_table':
                 levels = np.linspace(0, 1, 25)
             else:
-                # For concentration, use more levels for smoother appearance
-                levels = np.linspace(vmin, vmax, 50)
+                # For concentration, use more levels for smoother appearance and global range
+                levels = np.linspace(vmin_global, vmax_global, 50)
                 
             cf = ax.contourf(Xi, Yi, Zi, levels=levels,
-                            cmap=colormap, vmin=vmin, vmax=vmax)
+                            cmap=colormap, vmin=vmin_global, vmax=vmax_global)
             
             if idx == 0:
                 contour_for_cbar = cf

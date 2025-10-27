@@ -24,8 +24,8 @@ def main_transport():
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 10),
-        dt_td=timedelta(hours=2)  # Smaller timestep for smoother transport curves
+        end_datetime=datetime(2024, 5, 20),
+        dt_td=timedelta(hours=4)  # Smaller timestep for smoother transport curves
     )
     
     # ==========================================
@@ -66,8 +66,8 @@ def main_transport():
     chloride_source.add_event(
         name="deicing_zone",
         start=config.t_end_hours*0.05,
-        end=config.t_end_hours*0.1,
-        rate=1000.0,  # Massive rate to test if source is working
+        end=config.t_end_hours*0.3,
+        rate=0.003,  # Reduced from 1000 to more reasonable level
         zones="deicing_zone"
     )
     
@@ -85,13 +85,13 @@ def main_transport():
     # Create materials with chloride transport properties
     till_mat = till()
     till_mat.transport = chloride_transport(
-        alpha_L=0.05,      # Longitudinal dispersivity [m]
+        alpha_L=0.0005,      # Longitudinal dispersivity [m]
         bulk_density=1600.0  # Till bulk density [kg/m³]
     )
     
     terreau_mat = terreau()
     terreau_mat.transport = chloride_transport(
-        alpha_L=0.03,      # Terreau has slightly lower dispersivity
+        alpha_L=0.0003,      # Terreau has slightly lower dispersivity
         bulk_density=1200.0  # Terreau bulk density [kg/m³]
     )
     
@@ -107,17 +107,13 @@ def main_transport():
     V = FunctionSpace(domain.mesh, "CG", 1)
     field_map = MaterialField(domain, V)
     
-    if not field_map.has_transport():
-        raise RuntimeError("Transport models not properly assigned!")
-    
     # ==========================================
     # 7. BOUNDARY CONDITIONS (Flow)
     # ==========================================
     bc_manager = BoundaryConditionManager(
         V,
-        initial_water_table=1.2,
-        water_table_trend=None,
-        time_converter=config.time_converter
+        left_wt=1,
+        right_wt=3
     )
     
     # ==========================================
@@ -143,7 +139,7 @@ def main_transport():
         bc_manager=None,  # No transport BCs for now
         transport_source=chloride_source,  # Chloride affects transport
         config=config,
-        debug=False  # Enable debug to see what's happening
+        debug=False  # Turn off debug now that it's working
     )
     
     # Set initial concentration (clean everywhere)

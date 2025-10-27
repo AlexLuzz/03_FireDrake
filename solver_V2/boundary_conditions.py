@@ -1,191 +1,112 @@
 """
-Boundary condition management for Richards equation
-Single source of truth for water table configuration
+Boundary conditions for Richards equation
 """
 from firedrake import DirichletBC, Function
 
 class BoundaryConditionManager:
-    """
-    Manages boundary conditions and water table configuration
-    
-    Water table can be:
-    - Constant: fixed elevation
-    - Linear trend: declining or rising over time
-    """
-    
-    def __init__(self, V, initial_water_table=1.2, water_table_trend=None, time_converter=None):
+    def __init__(self, V, left_wt=1.2, right_wt=None, 
+                 left_trend=None, right_trend=None, time_converter=None):
         """
-        Initialize boundary condition manager
-        
         Args:
-            V: Firedrake function space
-            initial_water_table: float
-                Initial water table elevation (m)
-                Used if water_table_trend is None
-            water_table_trend: dict or None
-                For time-varying water table. Can use either seconds or datetime:
-                
-                Option 1 - Seconds (legacy):
-                {
-                    't_end': float (seconds),
-                    'H0_end': float (m)
-                }
-                
-                Option 2 - Datetime (recommended):
-                {
-                    'start_datetime': datetime (optional, defaults to simulation start),
-                    'end_datetime': datetime,
-                    'H0_start': float (m),
-                    'H0_end': float (m)
-                }
-                
-                Linear trend from H0_start → H0_end
-            
-            time_converter: TimeConverter object (required if using datetime mode)
-                
+            V: Function space
+            left_wt: Left water table elevation (m)
+            right_wt: Right water table elevation (m). If None, uses left_wt
+            left_trend: (t_end, wt_end) or (datetime_end, wt_end) for left boundary
+            right_trend: (t_end, wt_end) or (datetime_end, wt_end) for right boundary
+            time_converter: Required if using datetime in trends
+        
         Examples:
-            # Constant water table at 1.5m
-            bc = BoundaryConditionManager(V, initial_water_table=1.5)
+            # Constant symmetric
+            bc = BoundaryConditionManager(V, left_wt=1.5)
             
-            # Declining: 1.5m → 1.0m over 1 year (seconds mode)
-            bc = BoundaryConditionManager(
-                V, 
-                initial_water_table=1.5,
-                water_table_trend={'t_end': 365*86400, 'H0_end': 1.0}
-            )
+            # Constant gradient
+            bc = BoundaryConditionManager(V, left_wt=1.8, right_wt=1.2)
             
-            # Declining: 1.2m → 1.0m from Feb 22 to Dec 31, 2024 (datetime mode)
-            bc = BoundaryConditionManager(
-                V, 
-                initial_water_table=1.2,
-                water_table_trend={
-                    'start_datetime': datetime(2024, 2, 22),
-                    'end_datetime': datetime(2024, 12, 31),
-                    'H0_start': 1.2,
-                    'H0_end': 1.0
-                },
-                time_converter=config.time_converter
-            )
+            # Symmetric declining
+            bc = BoundaryConditionManager(V, left_wt=1.5, 
+                                         left_trend=(365*86400, 1.0))
+            
+            # Asymmetric with different trends
+            bc = BoundaryConditionManager(V, left_wt=1.8, right_wt=1.2,
+                                         left_trend=(datetime(2024,12,31), 1.6),
+                                         right_trend=(datetime(2024,12,31), 0.9),
+                                         time_converter=config.time_converter)
         """
         self.V = V
         self.mesh = V.mesh()
         self.time_converter = time_converter
-        
-        # Water table configuration
-        self.H0_initial = initial_water_table
-        self.use_trend = water_table_trend is not None
-        
-        if self.use_trend:
-            # Check if using datetime or seconds mode
-            if 'end_datetime' in water_table_trend:
-                # Datetime mode
-                if time_converter is None:
-                    raise ValueError("time_converter required when using end_datetime in water_table_trend")
-                
-                # Get trend parameters
-                start_datetime = water_table_trend.get('start_datetime', time_converter.start)
-                end_datetime = water_table_trend['end_datetime']
-                H0_start = water_table_trend.get('H0_start', initial_water_table)
-                H0_end = water_table_trend['H0_end']
-                
-                # Convert to seconds relative to simulation start
-                self.t_start = time_converter.to_seconds(start_datetime)
-                self.t_end = time_converter.to_seconds(end_datetime)
-                self.H0_start = H0_start
-                self.H0_end = H0_end
-                
-                # Linear slope: H0(t) = H0_start + slope × (t - t_start)
-                self.slope = (self.H0_end - self.H0_start) / (self.t_end - self.t_start)
-                
-                print(f"Water table trend (datetime mode):")
-                print(f"  From: {start_datetime.strftime('%Y-%m-%d')} at {H0_start:.3f} m")
-                print(f"  To:   {end_datetime.strftime('%Y-%m-%d')} at {H0_end:.3f} m")
-                print(f"  Slope: {self.slope * 86400 * 1000:.3f} mm/day")
-            else:
-                # Seconds mode (legacy)
-                self.t_start = 0.0
-                self.t_end = water_table_trend['t_end']
-                self.H0_start = initial_water_table
-                self.H0_end = water_table_trend['H0_end']
-                
-                # Linear slope: H0(t) = H0_initial + slope × t
-                self.slope = (self.H0_end - self.H0_start) / self.t_end
-                
-                print(f"Water table trend (seconds mode):")
-                print(f"  Initial: {self.H0_start:.3f} m")
-                print(f"  Final:   {self.H0_end:.3f} m at t={self.t_end/86400:.1f} days")
-            
-        else:
-            print(f"Water table: constant at {self.H0_initial:.3f} m")
-        
-        # Create hydrostatic profile
-        self.hydrostatic_profile = Function(self.V)
         self.y_coords = self.mesh.coordinates.dat.data[:, 1]
         
-        # Initialize with initial water table
-        self._update_profile(self.H0_initial)
-    
-    def _update_profile(self, H0):
-        """
-        Update hydrostatic pressure profile
-        
-        EQUATION: Hp(y) = H0 - y
-        
-        Args:
-            H0: Water table elevation (m)
-        """
-        for i, y in enumerate(self.y_coords):
-            self.hydrostatic_profile.dat.data[i] = H0 - y
-    
-    def get_water_table_elevation(self, t):
-        """
-        Get water table elevation at time t
-        
-        LINEAR TREND: H0(t) = H0_initial + slope × t
-        
-        Args:
-            t: Current time (seconds)
-        
-        Returns:
-            Water table elevation (m)
-        """
-        if not self.use_trend:
-            return self.H0_initial
-        
-        # Linear interpolation (clamp to bounds)
-        if t <= self.t_start:
-            return self.H0_start
-        elif t >= self.t_end:
-            return self.H0_end
+        # Set up left boundary
+        self.left_wt_0 = left_wt
+        if left_trend:
+            t_end, wt_end = left_trend
+            self.left_t_end = self._to_seconds(t_end)
+            self.left_wt_end = wt_end
+            self.left_slope = (wt_end - left_wt) / self.left_t_end
         else:
-            return self.H0_start + self.slope * (t - self.t_start)
+            self.left_t_end = None
+        
+        # Set up right boundary
+        self.right_wt_0 = right_wt if right_wt is not None else left_wt
+        if right_trend:
+            t_end, wt_end = right_trend
+            self.right_t_end = self._to_seconds(t_end)
+            self.right_wt_end = wt_end
+            self.right_slope = (wt_end - self.right_wt_0) / self.right_t_end
+        else:
+            self.right_t_end = None
+        
+        # Create boundary functions
+        self.bc_left = Function(V, name="BC_left")
+        self.bc_right = Function(V, name="BC_right")
+        
+        self._update(0.0)
     
-    def get_dirichlet_bcs(self, t=0.0) -> list:
-        """
-        Get Dirichlet boundary conditions at time t
-        Automatically updates if water table is time-varying
-        
-        Args:
-            t: Current time (seconds)
-        
-        Returns:
-            List of DirichletBC objects
-        """
-        # Update hydrostatic profile for current time
-        H0_current = self.get_water_table_elevation(t)
-        self._update_profile(H0_current)
-        
-        bcs = []
-        
-        # Lateral boundaries: hydrostatic pressure
-        bc_left = DirichletBC(self.V, self.hydrostatic_profile, 1)
-        bc_right = DirichletBC(self.V, self.hydrostatic_profile, 2)
-        bcs.extend([bc_left, bc_right])
-        
-        # Bottom boundary: free drainage 
-        # If you need Dirichlet at bottom, uncomment:
-        # bc_bottom = DirichletBC(self.V, Constant(0), 3)
-        # bcs.append(bc_bottom)
-        
-        return bcs
+    def _to_seconds(self, time):
+        """Convert time to seconds (handles both datetime and float)"""
+        if hasattr(time, 'year'):  # datetime object
+            if self.time_converter is None:
+                raise ValueError("time_converter required for datetime")
+            return self.time_converter.to_seconds(time)
+        return float(time)
     
+    def _get_wt_left(self, t):
+        """Get left water table at time t"""
+        if self.left_t_end is None:
+            return self.left_wt_0
+        if t >= self.left_t_end:
+            return self.left_wt_end
+        return self.left_wt_0 + self.left_slope * t
+    
+    def _get_wt_right(self, t):
+        """Get right water table at time t"""
+        if self.right_t_end is None:
+            return self.right_wt_0
+        if t >= self.right_t_end:
+            return self.right_wt_end
+        return self.right_wt_0 + self.right_slope * t
+    
+    def _update(self, t):
+        """Update hydrostatic profiles: h(y) = wt - y"""
+        left_wt = self._get_wt_left(t)
+        right_wt = self._get_wt_right(t)
+        self.bc_left.dat.data[:] = left_wt - self.y_coords
+        self.bc_right.dat.data[:] = right_wt - self.y_coords
+    
+    def get_dirichlet_bcs(self, t=0.0):
+        """Get boundary conditions at time t"""
+        self._update(t)
+        return [
+            DirichletBC(self.V, self.bc_left, 1),   # Left
+            DirichletBC(self.V, self.bc_right, 2),  # Right
+        ]
+    
+    def get_water_table(self, t):
+        """Get (left_wt, right_wt) at time t"""
+        return self._get_wt_left(t), self._get_wt_right(t)
+    
+    def get_gradient(self, t):
+        """Get hydraulic gradient (left - right) at time t"""
+        left, right = self.get_water_table(t)
+        return left - right

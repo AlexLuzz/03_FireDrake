@@ -3,7 +3,7 @@ Advection-Dispersion transport solver
 Solves: ∂(θc)/∂t + ∇·(vc) = ∇·(D∇c) + S
 """
 from firedrake import (
-    Function, TrialFunction, TestFunction, dx, ds, lhs, rhs, solve,
+    Function, TrialFunction, TestFunction, dx, ds, lhs, rhs, solve, min_value,
     as_matrix, sqrt, grad, dot, conditional, project, VectorFunctionSpace, Constant, SpatialCoordinate, And
 )
 import numpy as np
@@ -93,7 +93,11 @@ class TransportSolver:
         # Compute v = -K∇h (head already includes elevation effects)
         vx = project(-K_field * grad(pressure)[0], self.V)
         vy = project(-K_field * (grad(pressure)[1] + 1.0), self.V)  # Add gravity in y-direction
-        
+
+        # Assemble into vector field
+        self.velocity.dat.data[:, 0] = np.maximum(vx.dat.data_ro, 1e-14)
+        self.velocity.dat.data[:, 1] = np.maximum(vy.dat.data_ro, 1e-14)
+
         # Assemble into vector field
         self.velocity.dat.data[:, 0] = vx.dat.data_ro
         self.velocity.dat.data[:, 1] = vy.dat.data_ro
@@ -102,103 +106,33 @@ class TransportSolver:
         if self.debug:
             v_mag = np.sqrt(vx.dat.data_ro**2 + vy.dat.data_ro**2)
             print(f"  Velocity: min={v_mag.min():.2e} m/s, max={v_mag.max():.2e} m/s, mean={v_mag.mean():.2e} m/s")
-    
-    def get_source_function(self, t):
-        """
-        Create volumetric concentration source as a Function on the mesh
-        Apply a direct concentration rate (mg/L/hr) in specified zones during active events
-        """
-        source_func = Function(self.V, name="chloride_source")
-        source_func.assign(Constant(0.0))
-        
-        # Get current rate from scenario - t is in seconds, events are stored in seconds
-        t_hours = t / 3600.0
-        
-        if self.debug:
-            print(f"  DEBUG: get_source_function called at t={t:.1f}s ({t_hours:.1f}h)")
-            print(f"  DEBUG: Found {len(self.transport_source.events)} events")
-        
-        for event in self.transport_source.events:
-            if self.debug:
-                print(f"  DEBUG: Event '{event.name}': start={event.start:.1f}s ({event.start/3600:.1f}h), end={event.end:.1f}s ({event.end/3600:.1f}h), rate={event.rate}")
-            
-            if event.start <= t <= event.end:
-                if self.debug:
-                    print(f"  DEBUG: Event '{event.name}' is ACTIVE!")
-                    print(f"  DEBUG: Found {len(self.transport_source.zones)} zones")
-                
-                # Get coordinates for zone checking
-                coords = SpatialCoordinate(self.mesh)
-                x, y = coords
-                
-                # Apply rate to each zone
-                for zone in self.transport_source.zones:
-                    if self.debug:
-                        print(f"  DEBUG: Checking zone '{zone.name}' against event zones: {event.zones}")
-                    
-                    # Check if this zone name matches any zone in the event
-                    zone_names_in_event = [z.name if hasattr(z, 'name') else str(z) for z in event.zones]
-                    if zone.name in zone_names_in_event:
-                        if self.debug:
-                            print(f"  DEBUG: Zone '{zone.name}': x=[{zone.x_min}, {zone.x_max}], y=[{zone.y_min}, {zone.y_max}]")
-                        
-                        # Create zone condition
-                        zone_condition = And(And(x >= zone.x_min, x <= zone.x_max), 
-                                           And(y >= zone.y_min, y <= zone.y_max))
-                        
-                        # Apply concentration rate (convert from arbitrary units to mg/L/hr)
-                        concentration_rate = event.rate  # mg/L/hr during application
-                        
-                        # Convert to per-second rate for the timestep
-                        rate_per_second = concentration_rate / 3600.0  # mg/L/s
-                        
-                        # Add to source function where zone condition is true
-                        source_func = conditional(zone_condition, 
-                                                Constant(rate_per_second), 
-                                                source_func)
-                        
-                        if self.debug:
-                            # Count nodes in the zone for debugging
-                            test_func = Function(self.V)
-                            test_func.interpolate(conditional(zone_condition, Constant(1.0), Constant(0.0)))
-                            num_nodes = np.sum(test_func.dat.data_ro > 0.5)
-                            print(f"  Source '{zone.name}': {event.rate} units applied as {concentration_rate} mg/L/hr at {num_nodes} nodes")
-            else:
-                if self.debug:
-                    print(f"  DEBUG: No active source (rate=0.0)")
-        
-        return source_func
-    
+
     def construct_dispersion_tensor(self, D_L, D_T, vx, vy):
-        """
-        Construct anisotropic dispersion tensor
-        
+        """ Construct anisotropic dispersion tensor
         D_ij = (D_T * |v|) * δ_ij + (D_L - D_T) * (v_i * v_j / |v|)
-        
+
         Returns:
         --------
         D_tensor : 2x2 UFL matrix
         """
         # Velocity magnitude (add small value to avoid division by zero)
         v_mag = sqrt(vx**2 + vy**2 + 1e-20)
-        
+
         # Anisotropic components
         D_xx = D_T * v_mag + (D_L - D_T) * vx**2 / v_mag
         D_yy = D_T * v_mag + (D_L - D_T) * vy**2 / v_mag
         D_xy = (D_L - D_T) * vx * vy / v_mag
-        
+
         # Handle very small velocities (use isotropic molecular diffusion)
         threshold = 1e-10  # m/s
         D_iso = D_L  # Molecular diffusion when v ≈ 0
-        
+
         D_xx_final = conditional(v_mag > threshold, D_xx, D_iso)
         D_yy_final = conditional(v_mag > threshold, D_yy, D_iso)
         D_xy_final = conditional(v_mag > threshold, D_xy, 0.0)
-        
+
         # Construct tensor as UFL matrix
-        D_tensor = as_matrix([[D_xx_final, D_xy_final],
-                              [D_xy_final, D_yy_final]])
-        
+        D_tensor = as_matrix([[D_xx_final, D_xy_final], [D_xy_final, D_yy_final]])
         return D_tensor
 
     def solve_timestep(self, t: float):
@@ -223,11 +157,11 @@ class TransportSolver:
         
         #D_L, D_T = self.field_map.get_dispersion_field(pressure, vx, vy)
         # Temporarily increase dispersion for testing
-        D_L = Constant(0.001)  # m²/s - higher for testing
-        D_T = Constant(0.0005)  # m²/s
+        D_L = Constant(5.0e-5)  # m²/s - higher for testing
+        D_T = Constant(5.0e-6)  # m²/s
 
         # Step 3: Get source
-        source_func = self.get_source_function(t)
+        source_expr = self.transport_source.get_flux_expression(t, self.mesh)
         
         # Step 4: Solve transport equation
         # ∂(θc)/∂t + ∇·(vc) = ∇·(D∇c) + S
@@ -240,38 +174,44 @@ class TransportSolver:
         storage_coeff = R * theta
         
         # Time discretization parameter (theta-method)
-        # theta_time = 1.0 is backward Euler (implicit, stable)
-        # theta_time = 0.5 is Crank-Nicolson (second-order)
-        theta_time = 1.0
-        
-        c_adv = theta_time * c + (1.0 - theta_time) * self.c_n
-        c_disp = theta_time * c + (1.0 - theta_time) * self.c_n
-        
-        # Time derivative
-        F = storage_coeff * (c - self.c_n) / self.config.dt * q * dx
-        
-        # Advection
-        F += -dot(self.velocity, grad(q)) * c_adv * dx
+        theta_time = 1.0  # is backward Euler (implicit, stable)
+        dt = Constant(self.config.dt)
 
+        c_mid = theta_time * c + (1.0 - theta_time) * self.c_n
+        
+        # (1) Time derivative term
+        F = storage_coeff * (c - self.c_n) / dt * q * dx
+
+        # (2) Advection term (conservative form)
+        # integrate ∇·(v c) by parts → -∫ c v·∇q + ∫_Γ q c v·n
+        F += - dot(self.velocity, grad(q)) * c_mid * dx
+
+        # (3) Dispersion–diffusion term
         D_tensor = self.construct_dispersion_tensor(D_L, D_T, vx, vy)
-        F += -dot(dot(D_tensor, grad(c_disp)), grad(q)) * dx
+        F += - dot(dot(D_tensor, grad(c_mid)), grad(q)) * dx
 
-        F += -source_func * q * dx
-        
+        # (4) Source/sink term
+        F += -source_expr * q * dx
+
+        # ✅ ADD DECAY (first-order degradation)
+        # decay_rate = Constant(0.0001)  # 1/s - tune this (0.0001 = 0.36/hour half-life)
+        # F += decay_rate * theta * c_adv * q * dx  # Removes mass
+
         a = lhs(F)
         L = rhs(F)
         
-                # Solve with appropriate solver parameters for transport
+        # Solve with appropriate solver parameters for transport
         solver_params = {
             'ksp_type': 'gmres',
-            'pc_type': 'bjacobi',
-            'ksp_rtol': 1e-6,
-            'ksp_atol': 1e-10,
-            'ksp_max_it': 1000,
+            'pc_type': 'hypre',
+            'pc_hypre_type': 'boomeramg',
+            'ksp_rtol': 1e-4,
+            'ksp_atol': 1e-6,
+            'ksp_max_it': 100,
+            'ksp_gmres_restart': 50
         }
 
-        # No boundary conditions for transport (natural no-flux boundaries)
-        # Solve
+        # Solve (no boundary conditions for transport - natural no-flux boundaries)
         solve(a == L, self.c_new, bcs=[],
               solver_parameters=solver_params)
 
