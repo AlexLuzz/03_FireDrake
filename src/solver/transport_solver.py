@@ -228,6 +228,103 @@ class TransportSolver:
         # Update
         self.c_n.assign(self.c_new)
     
+    def solve_timestep_DG(self, t: float):
+        """DG version of transport solve"""
+        from firedrake import (FacetNormal, jump, avg, conditional, 
+                            dS, CellVolume, FacetArea)
+        
+        # Step 1-2: Same as before (compute velocity, get coefficients)
+        self.compute_darcy_velocity()
+        pressure = self.pressure_solver.p_n
+        theta = self.field_map.get_theta_field(pressure)
+        R = self.field_map.get_retardation_field(pressure)
+        
+        # Get velocity components
+        vx = Function(self.V)
+        vy = Function(self.V)
+        vx.dat.data[:] = self.velocity.dat.data_ro[:, 0]
+        vy.dat.data[:] = self.velocity.dat.data_ro[:, 1]
+        
+        D_L = Constant(5.0e-5)
+        D_T = Constant(5.0e-6)
+        D_tensor = self.construct_dispersion_tensor(D_L, D_T, vx, vy)
+        
+        source_expr = self.transport_source.get_flux_expression(t, self.mesh)
+        
+        # Trial and test functions
+        c = TrialFunction(self.V)
+        q = TestFunction(self.V)
+        
+        storage_coeff = R * theta
+        theta_time = 1.0
+        dt = Constant(self.config.dt)
+        c_mid = theta_time * c + (1.0 - theta_time) * self.c_n
+        
+        # === DG FORMULATION ===
+        
+        # (1) Time derivative (unchanged)
+        F = storage_coeff * (c - self.c_n) / dt * q * dx
+        
+        # (2) ADVECTION with upwind flux
+        n = FacetNormal(self.mesh)
+        v_vec = as_vector([vx, vy])
+        
+        # Volumetric term (integration by parts)
+        F += dot(v_vec, grad(q)) * c_mid * dx
+        
+        # Upwind numerical flux on interior faces
+        v_n = dot(v_vec, n)
+        c_up = conditional(v_n('+') > 0, c_mid('+'), c_mid('-'))
+        F += jump(q) * (v_n('+') * c_up) * dS
+        
+        # Boundary flux (for no-flux boundaries, often zero)
+        # F += q * v_n * c_mid * ds  # Only if you have inflow/outflow
+        
+        # (3) DISPERSION with Interior Penalty (SIPG)
+        h = CellVolume(self.mesh) / FacetArea(self.mesh)
+        alpha = Constant(10.0)  # Penalty parameter - tune if unstable
+        
+        # Volumetric term
+        F += dot(dot(D_tensor, grad(c_mid)), grad(q)) * dx
+        
+        # Interior penalty terms
+        D_avg = avg(D_tensor)
+        F += -dot(avg(dot(D_tensor, grad(c_mid))), jump(q, n)) * dS
+        F += -dot(jump(c_mid, n), avg(dot(D_tensor, grad(q)))) * dS
+        F += (alpha/avg(h)) * dot(jump(c_mid, n), jump(q, n)) * dS
+        
+        # Boundary penalty (if Dirichlet BCs needed)
+        # F += -(dot(dot(D_tensor, grad(c_mid)), n) * q) * ds
+        # F += -(dot(dot(D_tensor, grad(q)), n) * c_mid) * ds
+        # F += (alpha/h) * c_mid * q * ds
+        
+        # (4) Source term (unchanged)
+        F += -source_expr * q * dx
+        
+        # Extract bilinear and linear forms
+        a = lhs(F)
+        L = rhs(F)
+    
+        # Solver parameters (may need adjustment for DG)
+        solver_params = {
+            'ksp_type': 'gmres',
+            'pc_type': 'bjacobi',  # Block Jacobi often better for DG
+            'sub_pc_type': 'ilu',
+            'ksp_rtol': 1e-6,
+            'ksp_atol': 1e-8,
+            'ksp_max_it': 200
+        }
+        
+        solve(a == L, self.c_new, solver_parameters=solver_params)
+    
+        # Non-negativity enforcement (still needed)
+        c_data = self.c_new.dat.data
+        negative_nodes = c_data < 0
+        if negative_nodes.any():
+            c_data[negative_nodes] = 0.0
+        
+        self.c_n.assign(self.c_new)
+
     def run(self, probe_manager=None, snapshot_manager=None):
         """
         Run coupled flow-transport simulation
