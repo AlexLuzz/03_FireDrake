@@ -4,16 +4,7 @@ Chloride infiltration from de-icing salt application
 """
 from datetime import datetime, timedelta
 from firedrake import FunctionSpace
-
-# Solver imports
-from solver_V2 import *
-from visualization import *
-from setup import *
-from setup.source_term import rainfall_scenario, SourceScenario
-
-# Physics imports
-from physics_V2 import *
-from physics_V2.transport_models import chloride_transport
+from src import *
 
 def main_transport():
     """Main coupled flow-transport simulation"""
@@ -25,7 +16,7 @@ def main_transport():
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
         end_datetime=datetime(2024, 5, 20),
-        dt_td=timedelta(hours=4)  # Smaller timestep for smoother transport curves
+        dt_td=timedelta(hours=2)  # Smaller timestep for smoother transport curves
     )
     
     # ==========================================
@@ -112,8 +103,8 @@ def main_transport():
     # ==========================================
     bc_manager = BoundaryConditionManager(
         V,
-        left_wt=1,
-        right_wt=3
+        left_wt=3,
+        right_wt=4.5
     )
     
     # ==========================================
