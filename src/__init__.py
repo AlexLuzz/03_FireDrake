@@ -15,23 +15,12 @@ Main modules:
 
 # Core physics modules
 from .physics import (
-    Domain,
-    MaterialField, 
     VanGenuchtenModel,
     CurveBasedHydraulicModel,
     HydraulicCurves,
-    till,
-    terreau,
     AnalyticalTransportModel,
     archie_resistivity,
     chloride_transport,
-)
-
-# Solver modules
-from .solver import (
-    RichardsSolver,
-    TransportSolver,
-    BoundaryConditionManager
 )
 
 # Setup and configuration
@@ -44,12 +33,12 @@ from .setup import (
     SnapshotManager
 )
 
-# Visualization
-from .visualization import (
-    ResultsPlotter,
-    GifAnimator
+# Solver modules
+from .solver import (
+    RichardsSolver,
+    TransportSolver,
+    BoundaryConditionManager
 )
-
 
 # Tools
 from .tools import (
@@ -57,6 +46,20 @@ from .tools import (
     TimeConverter,
     fetch_rainfall_meteostat,
     import_results
+)
+
+# Visualization
+from .visualization import (
+    ResultsPlotter,
+    GifAnimator
+)
+
+# World
+from .world import (
+    Domain,
+    MaterialField,
+    till,
+    terreau
 )
 
 __version__ = "0.1.0"
@@ -75,11 +78,6 @@ __all__ = [
     'archie_resistivity',
     'chloride_transport',
     
-    # Solver
-    'RichardsSolver',
-    'TransportSolver', 
-    'BoundaryConditionManager',
-    
     # Setup
     'SimulationConfig',
     'SourceScenario',
@@ -87,14 +85,25 @@ __all__ = [
     'rainfall_scenario',
     'ProbeManager',
     'SnapshotManager',
-    
-    # Visualization
-    'ResultsPlotter',
-    'GifAnimator',
+
+    # Solver
+    'RichardsSolver',
+    'TransportSolver', 
+    'BoundaryConditionManager',
     
     # Tools
     'CSVLoader',
     'TimeConverter',
     'fetch_rainfall_meteostat',
     'import_results',
+
+    # Visualization
+    'ResultsPlotter',
+    'GifAnimator',
+
+    # World
+    'Domain',
+    'MaterialField',
+    'till',
+    'terreau'
 ]

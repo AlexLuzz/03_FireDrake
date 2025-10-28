@@ -1,20 +1,21 @@
 from .curve_tools import HydraulicCurves
-from .domain import Domain
-from .field_mapping import MaterialField
-from .hydraulic_models import VanGenuchtenModel, CurveBasedHydraulicModel
-from .materials import till, terreau
-from .transport_models import AnalyticalTransportModel, chloride_transport
 from .geophysical_models import archie_resistivity
+from .hydraulic_models import VanGenuchtenModel, CurveBasedHydraulicModel
+from .transport_models import AnalyticalTransportModel, chloride_transport
+
 
 __all__ = [
-    'HydraulicCurves', 
-    'Domain', 
-    'MaterialField',
+    # curve_tools
+    'HydraulicCurves',
+
+    # geophysical_models
+    'archie_resistivity',
+
+    # hydraulic_models
     'VanGenuchtenModel',
     'CurveBasedHydraulicModel',
-    'till',
-    'terreau',
+
+    # transport_models
     'AnalyticalTransportModel',
-    'archie_resistivity',
     'chloride_transport',
 ]

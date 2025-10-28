@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
-from .hydraulic_models import HydraulicModel, CurveBasedHydraulicModel, VanGenuchtenModel, VanGenuchtenParams
-from .transport_models import TransportModel
+from ..physics.hydraulic_models import HydraulicModel, CurveBasedHydraulicModel, VanGenuchtenModel, VanGenuchtenParams
+from ..physics.transport_models import TransportModel
 
 @dataclass
 class Material:

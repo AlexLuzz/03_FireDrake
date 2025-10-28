@@ -1,7 +1,7 @@
 from firedrake import Function
 import numpy as np
 from typing import Optional
-from .geophysical_models import archie_resistivity, ArchieParams, fluid_resistivity_from_concentration
+from ..physics.geophysical_models import archie_resistivity, ArchieParams, fluid_resistivity_from_concentration
 
 class MaterialField:
     """

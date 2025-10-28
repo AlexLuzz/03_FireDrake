@@ -5,7 +5,6 @@ Minimal ABC pattern like hydraulic_models.py
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import Optional
 
 # ==============================================
 # ABSTRACT BASE CLASS
