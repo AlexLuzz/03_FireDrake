@@ -15,8 +15,8 @@ def main_transport():
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 20),
-        dt_td=timedelta(hours=2)  # Smaller timestep for smoother transport curves
+        end_datetime=datetime(2024, 5, 30),
+        dt_td=timedelta(hours=6)  # Smaller timestep for smoother transport curves
     )
     
     # ==========================================
@@ -58,7 +58,7 @@ def main_transport():
         name="deicing_zone",
         start=config.t_end_hours*0.05,
         end=config.t_end_hours*0.3,
-        rate=0.003,  # Reduced from 1000 to more reasonable level
+        rate=0.01,  # Reduced from 1000 to more reasonable level
         zones="deicing_zone"
     )
     
@@ -68,30 +68,14 @@ def main_transport():
     # 4. GEOMETRY
     # ==========================================
     domain = Domain(nx=80, ny=40, Lx=20.0, Ly=5.0)
-    domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
+    #domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
     
     # ==========================================
     # 5. MATERIALS WITH TRANSPORT
     # ==========================================
-    # Create materials with chloride transport properties
-    till_mat = till()
-    till_mat.transport = chloride_transport(
-        alpha_L=0.0005,      # Longitudinal dispersivity [m]
-        bulk_density=1600.0  # Till bulk density [kg/m³]
-    )
-    
-    terreau_mat = terreau()
-    terreau_mat.transport = chloride_transport(
-        alpha_L=0.0003,      # Terreau has slightly lower dispersivity
-        bulk_density=1200.0  # Terreau bulk density [kg/m³]
-    )
-    
-    domain.assign("base", till_mat)
-    domain.assign("GI", terreau_mat)
-    domain.validate()
-    
-    print(f"✓ Materials assigned with transport properties")
-    
+    domain.assign("base", till_curve_RAF(transport=True))
+    #domain.assign("GI", terreau_curve_RAF(transport=True))
+
     # ==========================================
     # 6. FIELD MAPPING
     # ==========================================
@@ -103,8 +87,8 @@ def main_transport():
     # ==========================================
     bc_manager = BoundaryConditionManager(
         V,
-        left_wt=3,
-        right_wt=4.5
+        left_wt=2.5,
+        right_wt=4
     )
     
     # ==========================================
@@ -141,12 +125,6 @@ def main_transport():
     # ==========================================
     # 10. MONITORING SETUP
     # ==========================================
-    # Probe manager for chloride concentration monitoring
-    # Place probes strategically to monitor chloride plume:
-    # - One at the source zone (top of GI)
-    # - One in the middle of the GI zone  
-    # - One at the bottom to see infiltration
-    # - One outside the GI zone for comparison
     chloride_probe_positions = [
         [10.0, 4.8],   # Near source zone (top of GI)
         [10.0, 3.0],   # Middle of GI zone
@@ -154,10 +132,10 @@ def main_transport():
         [7.0, 1.5],    # Outside GI zone (control point)
     ]
     chloride_probe_names = [
-        "Source_Zone", 
-        "GI_Middle", 
-        "Deep_Infiltration", 
-        "Control_Point"
+        "LTC 1", 
+        "LTC 2", 
+        "LTC 3", 
+        "LTC 4"
     ]
     
     probe_manager = ProbeManager(

@@ -40,10 +40,9 @@ def main():
     # ==========================================
     # 4. MATERIALS (properties)
     # ==========================================
-    domain.assign("base", till())
-    domain.assign("GI", terreau())
-    domain.validate()
-    
+    domain.assign("base", till_curve_RAF())
+    domain.assign("GI", terreau_curve_RAF())
+
     # ==========================================
     # 5. MAPPING (connect materials to domain)
     # ==========================================

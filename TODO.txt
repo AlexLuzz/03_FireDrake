@@ -6,7 +6,7 @@
     - [ ] complete the helper to define chloride source
 
     ## Medium Priority ⚡
-    - [ ]     
+    - [ ] Improve from_library logic, maybe centralize the library
     - [ ] Implement test script with ANALYTICAL solution for validation
 
     ## Low Priority 💡

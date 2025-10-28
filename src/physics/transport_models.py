@@ -41,7 +41,7 @@ class TransportModel(ABC):
 class ContaminantProperties:
     """Physical/chemical properties of contaminants"""
     name: str
-    D0: float               # Molecular diffusion [m²/s]
+    Dd: float               # Molecular diffusion [m²/s]
     Kd: float = 0.0         # Sorption coefficient [L/kg]
     alpha_L: float = 0.01   # Longitudinal dispersivity [m]
     alpha_T: float = None   # Transverse dispersivity [m]
@@ -53,17 +53,17 @@ class ContaminantProperties:
     @classmethod
     def chloride(cls, alpha_L: float = 0.01):
         """Cl⁻ - conservative tracer"""
-        return cls(name="Chloride", D0=2.03e-9, Kd=0.0, alpha_L=alpha_L)
+        return cls(name="Chloride", Dd=2.03e-9, Kd=0.0, alpha_L=alpha_L)
     
     @classmethod
     def sodium(cls, alpha_L: float = 0.01):
         """Na⁺"""
-        return cls(name="Sodium", D0=1.33e-9, Kd=0.5, alpha_L=alpha_L)
+        return cls(name="Sodium", Dd=1.33e-9, Kd=0.5, alpha_L=alpha_L)
     
     @classmethod
     def calcium(cls, alpha_L: float = 0.01):
         """Ca²⁺"""
-        return cls(name="Calcium", D0=0.79e-9, Kd=2.0, alpha_L=alpha_L)
+        return cls(name="Calcium", Dd=0.79e-9, Kd=2.0, alpha_L=alpha_L)
 
 
 # ==============================================
@@ -103,9 +103,9 @@ class AnalyticalTransportModel(TransportModel):
             return theta / porosity if porosity > 0 else 0.0
     
     def effective_diffusion(self, porosity: float, saturation: float) -> float:
-        """D_eff = D₀ × τ(θ) [m²/s]"""
+        """D_0 = Dd × τ(θ) [m²/s]"""
         tau = self.tortuosity(porosity, saturation)
-        return self.props.D0 * tau
+        return self.props.Dd * tau
     
     def retardation_factor(self, porosity: float, saturation: float) -> float:
         """R = 1 + (ρb/θ) × Kd [-]"""
@@ -119,17 +119,18 @@ class AnalyticalTransportModel(TransportModel):
     def dispersion_coefficients(self, velocity: np.ndarray, 
                                 porosity: float, saturation: float) -> tuple:
         """
-        D_L = α_L |v| + D_eff
-        D_T = α_T |v| + D_eff
+        D_L = α_L |v| + D_0
+        D_T = α_T |v| + D_0
         
         Returns: (D_L, D_T) [m²/s]
         """
+        eps = 1e-12
         v_mag = np.linalg.norm(velocity)
-        D_eff = self.effective_diffusion(porosity, saturation)
-        
-        D_L = self.props.alpha_L * v_mag + D_eff
-        D_T = self.props.alpha_T * v_mag + D_eff
-        
+        #D_0 = self.effective_diffusion(porosity, saturation)
+
+        D_L = self.props.alpha_L * v_mag + D_0
+        D_T = self.props.alpha_T * v_mag + D_0
+
         return D_L, D_T
 
 

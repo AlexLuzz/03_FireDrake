@@ -10,128 +10,118 @@ class MaterialField:
     All inputs/outputs are Firedrake Functions
     """
     
-    def __init__(self, domain, function_space):
+    def __init__(self, domain, function_space, 
+                 transport: bool = True,
+                 geophysics: bool = False):
+
         self.domain = domain
+        domain.validate()
+        print(domain)
+
         self.V = function_space
-        
+        self.transport = transport
+        self.geophysics = geophysics
+
+        # Compute static transport fields if needed
+        if self.transport:
+            if not self.has_transport():
+                raise ValueError("No transport models assigned to any materials")
+
         # Geophysical model settings (optional)
         self.archie_params = None
         self.fluid_resistivity = 25.0  # Default clean water [Ω·m]
     
-    def _compute_field(self, state_function, property_func):
+    def _compute_field(self, state_functions, property_func):
         """
-        Generic field computation on Firedrake mesh, CORE method handling ALL field computations.
-        It works by:
-        1. Creating an empty field (Firedrake Function)
-        2. Looping over each region in the domain
-        3. For each region:
-           - Get the mask (boolean array of which mesh nodes are in this region)
-           - Get the material assigned to this region
-           - Extract the property using property_func(material, state)
-           - Fill in the field values for all nodes in this region
+        Generic spatial mapping: material properties → mesh fields
         
         Parameters:
         -----------
-        state_function : Function or None
-            - None for static properties (Ks, porosity, etc.)
-            - Pressure field for state-dependent properties (theta(p), kr(p))
+        state_functions : None, Function, or tuple of Functions
+            State variables needed by property_func
         
-        property_func : lambda function
-            Function that extracts property from material:
-            - For static: lambda mat, _: mat.Ks
-            - For dynamic: lambda mat, p: mat.hydraulic.theta(p)
-        
-        Returns:
-        --------
-        field : Function
-            Firedrake Function with property values at all mesh nodes
-        
-        Example:
-        --------
-        # Static property (Ks doesn't depend on pressure)
-        Ks_field = self._compute_field(None, lambda mat, _: mat.Ks)
-        
-        # Dynamic property (theta depends on pressure)
-        theta_field = self._compute_field(pressure, lambda mat, p: mat.hydraulic.theta(p))
-        
-        How it works for a 2-region domain:
-        - Region "base" with till material → fills nodes where mask_base=True with till properties
-        - Region "GI" with terreau material → fills nodes where mask_GI=True with terreau properties
+        property_func : callable
+            Extracts property from material:
+            - Static: lambda mat: mat.Ks
+            - Dynamic: lambda mat, p: mat.hydraulic.theta(p)
+            - Multi-state: lambda mat, p, vx, vy: mat.some_property(p, vx, vy)
         """
         field = Function(self.V)
         field_data = field.dat.data
         
-        state_data = state_function.dat.data_ro if state_function is not None else None
+        # Normalize inputs
+        if state_functions is None:
+            state_data_list = []
+        elif isinstance(state_functions, (list, tuple)):
+            state_data_list = [sf.dat.data_ro for sf in state_functions]
+        else:
+            state_data_list = [state_functions.dat.data_ro]
         
         for region_name, material in self.domain.materials.items():
             mask = self.domain.regions[region_name]
             
-            if state_data is None:
-                field_data[mask] = property_func(material, None)
+            if not state_data_list:
+                # Static property
+                field_data[mask] = property_func(material)
             else:
-                field_data[mask] = np.vectorize(lambda s: property_func(material, s))(state_data[mask])
+                # Dynamic property (1 or more states)
+                field_data[mask] = np.vectorize(
+                    lambda *states: property_func(material, *states)
+                )(*[sd[mask] for sd in state_data_list])
         
         return field
+
+    # =========================================
+    # GENERIC FIELDS
+    # =========================================
+    def get_rho_d_field(self):
+        """ρ_b: Bulk density [kg/m³]"""
+        return self._compute_field(None, lambda mat: mat.transport.rho_b 
+                                   if mat.transport else 0.0)
+    
+    def get_saturation_field(self, pressure_function):
+        """S(p): Saturation = θ / φ [-]"""
+        return self._compute_field(pressure_function, lambda mat, 
+                                   p: mat.hydraulic.saturation(p))
+    
+    # Not used
+    def get_porosity_field(self):
+        """φ: Porosity [-]"""
+        return self._compute_field(None, lambda mat: mat.porosity)
     
     # =========================================
     # HYDRAULIC FIELDS
     # =========================================
-    
-    def get_Ks_field(self):
-        """K_s: Saturated hydraulic conductivity [m/s]"""
-        return self._compute_field(None, lambda mat, _: mat.Ks)
-
-    def get_porosity_field(self):
-        """φ: Porosity [-]"""
-        return self._compute_field(None, lambda mat, _: mat.hydraulic.theta_s)
-    
-    def get_theta_r_field(self):
-        """θ_r: Residual water content [m³/m³]"""
-        return self._compute_field(None, lambda mat, _: mat.hydraulic.theta_r)
-    
+    #----------- Static fields -----------
+    # Not used
     def get_theta_s_field(self):
         """θ_s: Saturated water content [m³/m³]"""
-        return self._compute_field(None, lambda mat, _: mat.hydraulic.theta_s)
-    
+        return self._compute_field(None, lambda mat: mat.hydraulic.theta_s)
+
+    #----------- Dynamic fields ----------- 
+    # Not used
     def get_theta_field(self, pressure_function):
         """θ(p): Water content [m³/m³]"""
-        return self._compute_field(pressure_function, lambda mat, p: mat.hydraulic.theta(p))
+        return self._compute_field(pressure_function, lambda mat, 
+                                   p: mat.hydraulic._theta(p))
 
-    def get_kr_field(self, pressure_function):
-        """k_r(p): Relative permeability [-]"""
-        return self._compute_field(pressure_function, lambda mat, p: mat.hydraulic.kr(p))
-
+    # Used for Richards equation
     def get_Cm_field(self, pressure_function):
         """C_m(p): Moisture capacity [1/m]"""
-        return self._compute_field(pressure_function, lambda mat, p: mat.hydraulic.dtheta_dp(p))
+        return self._compute_field(pressure_function, lambda mat, 
+                                   p: mat.hydraulic._Cm(p))
 
+    # Used for Richards equation
     def get_K_field(self, pressure_function):
         """K(p): Hydraulic conductivity [m/s]"""
-        kr = self.get_kr_field(pressure_function)
-        Ks = self.get_Ks_field()
-        K = Function(self.V)
-        K.dat.data[:] = kr.dat.data_ro * Ks.dat.data_ro
-        return K
-    
-    def compute_saturation_field(self, pressure_function):
+        return self._compute_field(pressure_function, lambda mat, 
+                                   p: mat.hydraulic._k(p, mat.Ks))
+
+    # Used for Richards results visualization and to compute water level
+    def get_Se_field(self, pressure_function):
         """S_e(p): Effective saturation [-]"""
-        theta = self.get_theta_field(pressure_function)
-        theta_r = self.get_theta_r_field()
-        theta_s = self.get_theta_s_field()
-        
-        Se = Function(self.V)
-        Se.dat.data[:] = ((theta.dat.data_ro - theta_r.dat.data_ro) / 
-                          (theta_s.dat.data_ro - theta_r.dat.data_ro))
-        return Se
-    
-    def get_saturation_field(self, pressure_function):
-        """S(p): Saturation = θ / φ [-]"""
-        theta = self.get_theta_field(pressure_function)
-        phi = self.get_porosity_field()
-        
-        S = Function(self.V)
-        S.dat.data[:] = theta.dat.data_ro / phi.dat.data_ro
-        return S
+        return self._compute_field(pressure_function, lambda mat, 
+                                   p: mat.hydraulic._Se(p))
     
     # =========================================
     # TRANSPORT FIELDS
@@ -144,10 +134,35 @@ class MaterialField:
                 return True
         return False
     
+
+    # # Dynamic fields
+    def get_retardation_field(self, pressure_function):
+        """R: Retardation factor [-]
+        R = 1 + (ρ_b * K_d) / theta
+        """
+
+        theta = self.get_theta_field(pressure_function)
+        
+        R = Function(self.V)
+        R_data = R.dat.data
+        R_data[:] = 1.0  # Default
+        phi_data = phi.dat.data_ro
+        S_data = S.dat.data_ro  
+
+        for region_name, material in self.domain.materials.items():
+            if material.transport is None:
+                continue
+            
+            mask = self.domain.regions[region_name]
+            transport_model = material.transport
+            
+            for i in np.where(mask)[0]:
+                R_data[i] = transport_model.retardation_factor(phi_data[i], S_data[i])
+        
+        return R
+    
     def get_D_eff_field(self, pressure_function):
         """D_eff: Effective diffusion coefficient [m²/s]"""
-        if not self.has_transport():
-            raise ValueError("No transport models assigned")
         
         phi = self.get_porosity_field()
         S = self.get_saturation_field(pressure_function)
@@ -169,31 +184,6 @@ class MaterialField:
         
         return D_eff
     
-    def get_retardation_field(self, pressure_function):
-        """R: Retardation factor [-]"""
-        if not self.has_transport():
-            raise ValueError("No transport models assigned")
-        
-        phi = self.get_porosity_field()
-        S = self.get_saturation_field(pressure_function)
-        
-        R = Function(self.V)
-        R_data = R.dat.data
-        R_data[:] = 1.0  # Default
-        phi_data = phi.dat.data_ro
-        S_data = S.dat.data_ro
-        
-        for region_name, material in self.domain.materials.items():
-            if material.transport is None:
-                continue
-            
-            mask = self.domain.regions[region_name]
-            transport_model = material.transport
-            
-            for i in np.where(mask)[0]:
-                R_data[i] = transport_model.retardation_factor(phi_data[i], S_data[i])
-        
-        return R
     
     def get_dispersion_field(self, pressure_function, velocity_x, velocity_y):
         """
@@ -209,8 +199,6 @@ class MaterialField:
         --------
         (D_L, D_T) : tuple of Functions
         """
-        if not self.has_transport():
-            raise ValueError("No transport models assigned")
         
         phi = self.get_porosity_field()
         S = self.get_saturation_field(pressure_function)
@@ -327,3 +315,219 @@ class MaterialField:
                 return material
         
         raise ValueError(f"No material at ({x}, {y})")
+    
+
+        
+    def _smooth_at_boundaries(self, field, smooth_width: float = 0.1, 
+                          method: str = 'distance'):
+        """
+        Smooth field values near material boundaries
+        
+        Parameters:
+        -----------
+        field : Function
+            Field to smooth
+        smooth_width : float
+            Width of smoothing zone [m]
+        method : str
+            'distance' - Distance-weighted blending
+            'gaussian' - Gaussian kernel smoothing
+            'simple' - Simple neighbor averaging
+        
+        Returns:
+        --------
+        smoothed_field : Function
+        """
+        if method == 'distance':
+            return self._smooth_distance_weighted(field, smooth_width)
+        elif method == 'gaussian':
+            return self._smooth_gaussian(field, smooth_width)
+        elif method == 'simple':
+            return self._smooth_neighbors(field, smooth_width)
+        else:
+            raise ValueError(f"Unknown smoothing method: {method}")
+
+
+    def _smooth_distance_weighted(self, field, smooth_width: float):
+        """
+        Distance-weighted smoothing at boundaries
+        Blends values from different materials based on distance to interface
+        """
+        from scipy.spatial import cKDTree
+        
+        smoothed = Function(self.V)
+        coords = self.domain.coords
+        field_data = field.dat.data_ro
+        smoothed_data = smoothed.dat.data
+        
+        # Copy original data
+        smoothed_data[:] = field_data
+        
+        # Find boundary nodes (nodes at interface between materials)
+        boundary_nodes = self._find_boundary_nodes()
+        
+        if len(boundary_nodes) == 0:
+            return field  # No boundaries, return original
+        
+        # Build KD-tree for distance queries
+        boundary_coords = coords[boundary_nodes]
+        tree = cKDTree(boundary_coords)
+        
+        # Find nodes within smooth_width of any boundary
+        distances, nearest_idx = tree.query(coords, distance_upper_bound=smooth_width)
+        nodes_to_smooth = distances < smooth_width
+        
+        # Smooth these nodes using weighted average of nearby values
+        for i in np.where(nodes_to_smooth)[0]:
+            # Find all nodes within smooth_width
+            nearby_indices = tree.query_ball_point(coords[i], smooth_width)
+            
+            if len(nearby_indices) > 1:
+                # Weight by inverse distance
+                nearby_coords = boundary_coords[nearby_indices]
+                dists = np.linalg.norm(coords[i] - nearby_coords, axis=1)
+                dists[dists < 1e-10] = 1e-10  # Avoid division by zero
+                
+                weights = 1.0 / dists
+                weights /= weights.sum()
+                
+                # Get values at nearby boundary nodes
+                nearby_node_ids = boundary_nodes[nearby_indices]
+                nearby_values = field_data[nearby_node_ids]
+                
+                # Weighted average
+                smoothed_data[i] = np.sum(weights * nearby_values)
+        
+        return smoothed
+
+
+    def _smooth_gaussian(self, field, smooth_width: float):
+        """
+        Gaussian smoothing near boundaries
+        """
+        from scipy.spatial import cKDTree
+        from scipy.ndimage import gaussian_filter1d
+        
+        smoothed = Function(self.V)
+        coords = self.domain.coords
+        field_data = field.dat.data_ro
+        smoothed_data = smoothed.dat.data
+        
+        smoothed_data[:] = field_data
+        
+        boundary_nodes = self._find_boundary_nodes()
+        if len(boundary_nodes) == 0:
+            return field
+        
+        boundary_coords = coords[boundary_nodes]
+        tree = cKDTree(boundary_coords)
+        
+        # For each node near boundary, apply Gaussian-weighted average
+        distances, _ = tree.query(coords)
+        nodes_to_smooth = distances < smooth_width
+        
+        sigma = smooth_width / 3.0  # ~99% within smooth_width
+        
+        for i in np.where(nodes_to_smooth)[0]:
+            # Find neighbors within 3*sigma
+            neighbor_indices = np.where(
+                np.linalg.norm(coords - coords[i], axis=1) < 3*sigma
+            )[0]
+            
+            if len(neighbor_indices) > 1:
+                neighbor_coords = coords[neighbor_indices]
+                dists = np.linalg.norm(coords[i] - neighbor_coords, axis=1)
+                
+                # Gaussian weights
+                weights = np.exp(-0.5 * (dists / sigma)**2)
+                weights /= weights.sum()
+                
+                neighbor_values = field_data[neighbor_indices]
+                smoothed_data[i] = np.sum(weights * neighbor_values)
+        
+        return smoothed
+
+
+    def _smooth_neighbors(self, field, smooth_width: float):
+        """
+        Simple averaging with neighbors (fastest but crudest)
+        """
+        smoothed = Function(self.V)
+        coords = self.domain.coords
+        field_data = field.dat.data_ro
+        smoothed_data = smoothed.dat.data
+        
+        smoothed_data[:] = field_data
+        
+        boundary_nodes = self._find_boundary_nodes()
+        if len(boundary_nodes) == 0:
+            return field
+        
+        # For each boundary node, average with nearby nodes
+        for boundary_idx in boundary_nodes:
+            boundary_coord = coords[boundary_idx]
+            
+            # Find neighbors within smooth_width
+            distances = np.linalg.norm(coords - boundary_coord, axis=1)
+            neighbors = distances < smooth_width
+            
+            # Simple average
+            smoothed_data[boundary_idx] = np.mean(field_data[neighbors])
+        
+        return smoothed
+
+
+    def _find_boundary_nodes(self):
+        """
+        Find nodes at material boundaries
+        
+        Returns:
+        --------
+        boundary_nodes : ndarray
+            Indices of nodes at interfaces between materials
+        """
+        coords = self.domain.coords
+        n_nodes = len(coords)
+        
+        # A node is at a boundary if it's in multiple material regions
+        # OR if its neighbors belong to different materials
+        
+        is_boundary = np.zeros(n_nodes, dtype=bool)
+        
+        # Simple approach: Check if node has neighbors in different regions
+        region_names = list(self.domain.regions.keys())
+        
+        if len(region_names) <= 1:
+            return np.array([], dtype=int)  # Only one material, no boundaries
+        
+        # For each node, check if nearby nodes are in different regions
+        from scipy.spatial import cKDTree
+        tree = cKDTree(coords)
+        
+        # Query 5 nearest neighbors for each node
+        distances, indices = tree.query(coords, k=min(6, n_nodes))
+        
+        for i in range(n_nodes):
+            # Get material ID for this node
+            node_material = None
+            for region_name in region_names:
+                if self.domain.regions[region_name][i]:
+                    node_material = region_name
+                    break
+            
+            if node_material is None:
+                continue
+            
+            # Check if any neighbor has different material
+            for neighbor_idx in indices[i, 1:]:  # Skip self (index 0)
+                neighbor_material = None
+                for region_name in region_names:
+                    if self.domain.regions[region_name][neighbor_idx]:
+                        neighbor_material = region_name
+                        break
+                
+                if neighbor_material != node_material:
+                    is_boundary[i] = True
+                    break
+        
+        return np.where(is_boundary)[0]

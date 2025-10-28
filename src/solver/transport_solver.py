@@ -4,7 +4,7 @@ Solves: ∂(θc)/∂t + ∇·(vc) = ∇·(D∇c) + S
 """
 from firedrake import (
     Function, TrialFunction, TestFunction, dx, ds, lhs, rhs, solve, min_value,
-    as_matrix, sqrt, grad, dot, conditional, project, VectorFunctionSpace, Constant, SpatialCoordinate, And
+    as_matrix, sqrt, grad, dot, conditional, project, VectorFunctionSpace, Constant, as_vector, 
 )
 import numpy as np
 
@@ -43,16 +43,14 @@ class TransportSolver:
         self.transport_source = transport_source
         self.config = config
         self.debug = debug
-        
+        self.dx = dx(domain=self.mesh)
+
         # Concentration fields
         self.c_n = Function(V, name="Concentration_old")
         self.c_new = Function(V, name="Concentration")
         
         # Velocity field (computed from pressure)
         self.velocity = Function(self.V_vec, name="Darcy_velocity")
-        
-        # Static fields
-        self.Ks_field = field_map.get_Ks_field()
         
         self._set_initial_conditions()
     
@@ -86,13 +84,11 @@ class TransportSolver:
         pressure = self.pressure_solver.p_n
         
         # Get hydraulic conductivity field
-        kr = self.field_map.get_kr_field(pressure)
-        K_field = Function(self.V)
-        K_field.dat.data[:] = kr.dat.data_ro * self.Ks_field.dat.data_ro
+        k = self.field_map.get_K_field(pressure)
         
         # Compute v = -K∇h (head already includes elevation effects)
-        vx = project(-K_field * grad(pressure)[0], self.V)
-        vy = project(-K_field * (grad(pressure)[1] + 1.0), self.V)  # Add gravity in y-direction
+        vx = project(-k * grad(pressure)[0], self.V)
+        vy = project(-k * (grad(pressure)[1] + 1.0), self.V)  # Add gravity in y-direction
 
         # Assemble into vector field
         self.velocity.dat.data[:, 0] = np.maximum(vx.dat.data_ro, 1e-14)
@@ -102,37 +98,38 @@ class TransportSolver:
         self.velocity.dat.data[:, 0] = vx.dat.data_ro
         self.velocity.dat.data[:, 1] = vy.dat.data_ro
 
-        # Debug velocity diagnostics
-        if self.debug:
-            v_mag = np.sqrt(vx.dat.data_ro**2 + vy.dat.data_ro**2)
-            print(f"  Velocity: min={v_mag.min():.2e} m/s, max={v_mag.max():.2e} m/s, mean={v_mag.mean():.2e} m/s")
+    def construct_dispersion_tensor(self, D_0, alpha_L, alpha_T, vx, vy):
+        """ 
+        Construct the anisotropic dispersion tensor (2D)
+        D_ij = D0*δ_ij + |v| * [α_T*δ_ij + (α_L - α_T)*(v_i*v_j / |v|^2)]
 
-    def construct_dispersion_tensor(self, D_L, D_T, vx, vy):
-        """ Construct anisotropic dispersion tensor
-        D_ij = (D_T * |v|) * δ_ij + (D_L - D_T) * (v_i * v_j / |v|)
+        Parameters
+        ----------
+        D0 : float or UFL expression
+            Molecular diffusion coefficient
+        alpha_L, alpha_T : float
+            Longitudinal and transverse dispersivities
+        vx, vy : UFL expressions
+            Velocity components
 
-        Returns:
-        --------
+        Returns
+        -------
         D_tensor : 2x2 UFL matrix
         """
-        # Velocity magnitude (add small value to avoid division by zero)
-        v_mag = sqrt(vx**2 + vy**2 + 1e-20)
+        v_mag = sqrt(vx**2 + vy**2 + 1e-10)  # avoid division by zero
 
-        # Anisotropic components
-        D_xx = D_T * v_mag + (D_L - D_T) * vx**2 / v_mag
-        D_yy = D_T * v_mag + (D_L - D_T) * vy**2 / v_mag
-        D_xy = (D_L - D_T) * vx * vy / v_mag
+        # Longitudinal–transverse dispersion difference
+        dalpha = alpha_L - alpha_T
 
-        # Handle very small velocities (use isotropic molecular diffusion)
-        threshold = 1e-10  # m/s
-        D_iso = D_L  # Molecular diffusion when v ≈ 0
+        # Tensor components
+        D_xx = D_0 + v_mag * (alpha_T + dalpha * (vx**2) / (v_mag**2))
+        D_yy = D_0 + v_mag * (alpha_T + dalpha * (vy**2) / (v_mag**2))
+        #D_xy = v_mag * dalpha * (vx * vy) / (v_mag**2)
 
-        D_xx_final = conditional(v_mag > threshold, D_xx, D_iso)
-        D_yy_final = conditional(v_mag > threshold, D_yy, D_iso)
-        D_xy_final = conditional(v_mag > threshold, D_xy, 0.0)
+        # Assemble symmetric tensor
+        D_tensor = as_matrix([[D_xx, 0],
+                            [0, D_yy]])
 
-        # Construct tensor as UFL matrix
-        D_tensor = as_matrix([[D_xx_final, D_xy_final], [D_xy_final, D_yy_final]])
         return D_tensor
 
     def solve_timestep(self, t: float):
@@ -147,7 +144,12 @@ class TransportSolver:
         # Step 2: Get transport coefficients from current pressure
         pressure = self.pressure_solver.p_n
         theta = self.field_map.get_theta_field(pressure)
-        R = self.field_map.get_retardation_field(pressure)
+        porosity = self.field_map.get_porosity_field()
+
+        tortuosity = theta**(10.0/3.0) / (porosity**2)
+
+
+        #R = self.field_map.get_retardation_field(pressure)
         
         # Get dispersion coefficients
         vx = Function(self.V)
@@ -155,10 +157,10 @@ class TransportSolver:
         vx.dat.data[:] = self.velocity.dat.data_ro[:, 0]
         vy.dat.data[:] = self.velocity.dat.data_ro[:, 1]
         
-        #D_L, D_T = self.field_map.get_dispersion_field(pressure, vx, vy)
-        # Temporarily increase dispersion for testing
-        D_L = Constant(5.0e-5)  # m²/s - higher for testing
-        D_T = Constant(5.0e-6)  # m²/s
+        alpha_L = 1  # Longitudinal dispersivity [m]
+        alpha_T = alpha_L/10  # Transverse dispersivity [m]
+        Dd=2.03e-8
+        D_0 = Dd * tortuosity
 
         # Step 3: Get source
         source_expr = self.transport_source.get_flux_expression(t, self.mesh)
@@ -171,7 +173,7 @@ class TransportSolver:
         q = TestFunction(self.V)
         
         # Effective storage term (accounts for retardation)
-        storage_coeff = R * theta
+        #storage_coeff = R * theta
         
         # Time discretization parameter (theta-method)
         theta_time = 1.0  # is backward Euler (implicit, stable)
@@ -180,15 +182,15 @@ class TransportSolver:
         c_mid = theta_time * c + (1.0 - theta_time) * self.c_n
         
         # (1) Time derivative term
-        F = storage_coeff * (c - self.c_n) / dt * q * dx
+        F = (c - self.c_n) / dt * q * dx
 
         # (2) Advection term (conservative form)
         # integrate ∇·(v c) by parts → -∫ c v·∇q + ∫_Γ q c v·n
         F += - dot(self.velocity, grad(q)) * c_mid * dx
 
         # (3) Dispersion–diffusion term
-        D_tensor = self.construct_dispersion_tensor(D_L, D_T, vx, vy)
-        F += - dot(dot(D_tensor, grad(c_mid)), grad(q)) * dx
+        D_tensor = self.construct_dispersion_tensor(D_0, alpha_L, alpha_T, vx, vy)
+        F += dot(dot(D_tensor, grad(c_mid)), grad(q)) * dx
 
         # (4) Source/sink term
         F += -source_expr * q * dx
@@ -202,13 +204,9 @@ class TransportSolver:
         
         # Solve with appropriate solver parameters for transport
         solver_params = {
-            'ksp_type': 'gmres',
-            'pc_type': 'hypre',
-            'pc_hypre_type': 'boomeramg',
-            'ksp_rtol': 1e-4,
-            'ksp_atol': 1e-6,
-            'ksp_max_it': 100,
-            'ksp_gmres_restart': 50
+            'ksp_type': 'preonly',    # Direct solve
+            'pc_type': 'lu',          # LU factorization
+            'pc_factor_mat_solver_type': 'mumps'  # Robust direct solver
         }
 
         # Solve (no boundary conditions for transport - natural no-flux boundaries)

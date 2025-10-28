@@ -66,17 +66,17 @@ class HydraulicModel(ABC):
         pass
     
     @abstractmethod
-    def theta(self, pressure) -> float:
+    def _theta(self, pressure) -> float:
         """Water content at pressure head [m³/m³]"""
         pass
     
     @abstractmethod
-    def kr(self, pressure) -> float:
+    def _k(self, pressure) -> float:
         """Relative permeability at pressure head [-]"""
         pass
     
     @abstractmethod
-    def dtheta_dp(self, pressure) -> float:
+    def _Se(self, pressure) -> float:
         """Moisture capacity: ∂θ/∂p [1/m]"""
         pass
 
@@ -109,7 +109,7 @@ class VanGenuchtenModel(HydraulicModel):
     
     def __init__(self, 
                  params: VanGenuchtenParams, 
-                 epsilon: float = 0.01,
+                 epsilon: float = 0.051,
                  kr_min: float = 1e-8,
                  Ss: float = 1e-4):
         """
@@ -138,57 +138,108 @@ class VanGenuchtenModel(HydraulicModel):
     def theta_s(self) -> float:
         return self.params.theta_s
     
-    def _effective_saturation(self, pressure: float) -> float:
-        """Calculate effective saturation with epsilon smoothing"""
-        if pressure >= self.epsilon:
+    def _Se(self, pressure: float) -> float:
+        """
+        S_e(p): Effective saturation [-]
+        S_e = 1 / [1 + (α|p|)^n]^m
+        """
+        eps = self.epsilon
+        alpha = self.params.alpha
+        n = self.params.n
+        m = self.params.m
+
+        if pressure >= eps:
             return 1.0
-        elif pressure <= -self.epsilon:
-            return (1.0 + (self.params.alpha * abs(pressure))**self.params.n)**(-self.params.m)
+        elif pressure <= -eps:
+            Se = 1.0 / (1.0 + (alpha * abs(pressure))**n)**m
+            return max(0.0, min(1.0, Se))  # clamp between 0 and 1
         else:
-            # Smooth transition zone [-epsilon, +epsilon]
-            Se_unsat = (1.0 + (self.params.alpha * self.epsilon)**self.params.n)**(-self.params.m)
-            weight = (pressure + self.epsilon) / (2.0 * self.epsilon)
-            return Se_unsat + (1.0 - Se_unsat) * weight
+            Se_unsat = 1.0 / (1.0 + (alpha * eps)**n)**m # lower end (unsaturated)
+            # Linear interpolation between unsaturated and saturated ends
+            weight = (pressure + eps) / (2.0 * eps)
+            Se = Se_unsat + (1.0 - Se_unsat) * weight
+            return max(0.0, min(1.0, Se))
     
-    def theta(self, pressure) -> float:
-        """Water content via Van Genuchten equation"""
-        Se = self._effective_saturation(pressure)
-        return self.params.theta_r + Se * (self.params.theta_s - self.params.theta_r)
-    
-    def kr(self, pressure) -> float:
-        """Relative permeability via Mualem model"""
-        if pressure >= self.epsilon:
+    def _theta(self, pressure) -> float:
+        """
+        θ(p): Water content via Van Genuchten equation
+        θ(p) = θ_r + S_e(p) * (θ_s - θ_r)
+        """
+        theta_r = self.params.theta_r
+        theta_s = self.params.theta_s
+        Se = self._Se(pressure)
+        return theta_r + Se * (theta_s - theta_r)
+
+    def _kr(self, pressure) -> float:
+        """
+        Kr(p): Relative permeability [-] via Mualem model
+        Kr(p) = S_e(p)^l * [1 - (1 - S_e(p)^(1/m))^m]^2
+        """
+        eps = self.epsilon
+        l = self.params.l_param
+        m = self.params.m
+        if pressure >= eps:
             return 1.0
-        elif pressure <= -self.epsilon:
-            Se = self._effective_saturation(pressure)
-            kr_val = (Se**self.params.l_param * 
-                     (1.0 - (1.0 - Se**(1.0/self.params.m))**self.params.m)**2)
+        elif pressure <= -eps:
+            Se = self._Se(pressure)
+            term = max(0.0, 1.0 - Se**(1.0/m))  # avoid tiny negatives
+            kr_val = (Se**l) * (1.0 - term**m)**2
             return max(self.kr_min, min(kr_val, 1.0))
         else:
-            # Smooth transition zone
-            kr_unsat = self.kr(-self.epsilon)
-            weight = (pressure + self.epsilon) / (2.0 * self.epsilon)
-            return kr_unsat + (1.0 - kr_unsat) * weight
-    
-    def dtheta_dp(self, pressure) -> float:
-        """Moisture capacity (analytical derivative)"""
-        if pressure >= self.epsilon:
+            # Compute unsaturated endpoint value
+            Se_unsat = self._Se(-eps)
+            term = max(0.0, 1.0 - Se_unsat**(1.0/m))
+            kr_unsat = (Se_unsat**l) * (1.0 - term**m)**2
+            kr_unsat = max(self.kr_min, min(kr_unsat, 1.0))
+
+            # Linear interpolation between unsaturated and saturated states
+            weight = (pressure + eps) / (2.0 * eps)
+            kr_val = kr_unsat + (1.0 - kr_unsat) * weight
+            return max(self.kr_min, min(kr_val, 1.0))
+        
+    def _k(self, pressure, Ks) -> float:
+        """
+        K(p): Hydraulic conductivity [m/s]
+        K(p) = k_r(p) * K_s
+        """
+        return self._kr(pressure) * Ks
+
+    def _Cm(self, pressure) -> float:
+        """
+        Cm(p): Moisture capacity [1/m]
+        Cm(p) = alpha * m / (1 - m) * (θ_s - θ_r) * S_e^(1/m) * (1 - S_e^(1/m))^m
+        """
+        alpha = self.params.alpha
+        m = self.params.m
+        theta_s = self.params.theta_s
+        theta_r = self.params.theta_r
+        eps = self.epsilon
+        if pressure >= eps:
             return self.Ss
-        elif pressure <= -self.epsilon:
-            Se = self._effective_saturation(pressure)
-            Cm_val = ((self.params.alpha * self.params.m) / (1.0 - self.params.m) * 
-                     (self.params.theta_s - self.params.theta_r) * 
-                     Se**(1.0/self.params.m) * 
-                     (1.0 - Se**(1.0/self.params.m))**self.params.m)
+        elif pressure <= -eps:
+            Se = self._Se(pressure)
+            term = max(0.0, 1.0 - Se**(1.0 / m))
+            Cm_val = ((alpha * m) / (1.0 - m) *
+                    (theta_s - theta_r) *
+                    Se**(1.0 / m) *
+                    term**m)
             return max(self.Ss, Cm_val)
         else:
-            # Smooth transition zone
-            Cm_sat = self.Ss
-            Cm_unsat = self.dtheta_dp(-self.epsilon)
-            weight = (pressure + self.epsilon) / (2.0 * self.epsilon)
-            return Cm_unsat + (Cm_sat - Cm_unsat) * weight
+            # Unsaturated endpoint at -eps
+            Se_unsat = self._effective_saturation(-eps)
+            term = max(0.0, 1.0 - Se_unsat**(1.0 / m))
+            Cm_unsat = ((alpha * m) / (1.0 - m) *
+                        (theta_s - theta_r) *
+                        Se_unsat**(1.0 / m) *
+                        term**m)
+            Cm_unsat = max(self.Ss, Cm_unsat)
 
+            # Linear interpolation between unsat and sat
+            weight = (pressure + eps) / (2.0 * eps)
+            Cm_val = Cm_unsat + (self.Ss - Cm_unsat) * weight
+            return max(self.Ss, Cm_val)
 
+    
 # ==============================================
 # CURVE-BASED EMPIRICAL MODEL
 # ==============================================
@@ -204,9 +255,10 @@ class CurveBasedHydraulicModel(HydraulicModel):
                  kr_curve: CurveData,
                  theta_r: float = None,
                  theta_s: float = None,
-                 epsilon: float = 0.01,
+                 epsilon: float = 0.005,
+                 kr_min: float = 1e-8,
                  Ss: float = 1e-4,
-                 kr_min: float = 1e-8):
+                 ):
         """
         Parameters:
         -----------
@@ -258,26 +310,33 @@ class CurveBasedHydraulicModel(HydraulicModel):
     @property
     def theta_s(self) -> float:
         return self._theta_s
-    
-    def theta(self, pressure) -> float:
+
+    def _theta(self, pressure) -> float:
         """Water content via interpolation"""
         if pressure >= self.epsilon:
             return self._theta_s
         return self._theta_interp(pressure)
     
-    def kr(self, pressure) -> float:
+    def _kr(self, pressure) -> float:
         """Relative permeability via interpolation"""
         if pressure >= self.epsilon:
             return 1.0
         return self._kr_interp(pressure)
     
-    def dtheta_dp(self, pressure) -> float:
-        """Moisture capacity via numerical derivative"""
-        if pressure >= self.epsilon:
-            return self.Ss
-        
+    def _k(self, pressure, Ks) -> float:
+        """Hydraulic conductivity"""
+        return self._kr(pressure) * Ks
+
+    def _Cm(self, pressure) -> float:
+        """Moisture capacity"""
         Cm = self._theta_interp.derivative(pressure)
         return max(self.Ss, abs(Cm))
+
+    def _Se(self, pressure) -> float:
+        """Effective saturation via numerical derivative"""
+        theta = self._theta(pressure)
+        Se = (theta - self._theta_r) / (self._theta_s - self._theta_r)
+        return max(0.0, min(1.0, Se))
     
     @classmethod
     def from_library(cls, soil_type: str, smooth_window: int = 1, **kwargs):

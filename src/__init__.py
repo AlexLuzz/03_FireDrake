@@ -59,7 +59,9 @@ from .world import (
     Domain,
     MaterialField,
     till,
-    terreau
+    terreau,
+    till_curve_RAF,
+    terreau_curve_RAF
 )
 
 __version__ = "0.1.0"
@@ -105,5 +107,7 @@ __all__ = [
     'Domain',
     'MaterialField',
     'till',
-    'terreau'
+    'terreau',
+    'till_curve_RAF',
+    'terreau_curve_RAF'
 ]
