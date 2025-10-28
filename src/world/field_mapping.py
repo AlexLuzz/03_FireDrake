@@ -21,7 +21,7 @@ class MaterialField:
         self.V = function_space
         self.transport = transport
         self.geophysics = geophysics
-        
+
         # Geophysical model settings (optional)
         self.archie_params = None
         self.fluid_resistivity = 25.0  # Default clean water [Ω·m]
@@ -77,7 +77,7 @@ class MaterialField:
     def get_saturation_field(self, pressure_function):
         """S(p): Saturation = θ / φ [-]"""
         return self._compute_field(pressure_function, lambda mat, 
-                                   p: mat.hydraulic.saturation(p))
+                                   p: mat.hydraulic._theta(p)/mat.porosity)
     
     # Not used
     def get_porosity_field(self):
@@ -129,97 +129,31 @@ class MaterialField:
                 return True
         return False
     
-
     # # Dynamic fields
-    def get_retardation_field(self, pressure_function):
+    def get_R_field(self, pressure_function):
         """R: Retardation factor [-]
         R = 1 + (ρ_b * K_d) / theta
         """
         theta = self.get_theta_field(pressure_function)
-        
-        R = Function(self.V)
-        R_data = R.dat.data
-        R_data[:] = 1.0  # Default
-        phi_data = phi.dat.data_ro
-        S_data = S.dat.data_ro  
+        return self._compute_field(theta, lambda mat, 
+                                   th: mat.transport._R(th))
+    
+    def get_alpha_T_field(self):
+        """α_T: Longitudinal dispersivity [m]"""
+        return self._compute_field(None, lambda mat: mat.transport.props.alpha_T)
 
-        for region_name, material in self.domain.materials.items():
-            if material.transport is None:
-                continue
-            
-            mask = self.domain.regions[region_name]
-            transport_model = material.transport
-            
-            for i in np.where(mask)[0]:
-                R_data[i] = transport_model.retardation_factor(phi_data[i], S_data[i])
-        
-        return R
-    
-    def get_D_eff_field(self, pressure_function):
-        """D_eff: Effective diffusion coefficient [m²/s]"""
-        
+    def get_alpha_L_field(self):
+        """α_L: Longitudinal dispersivity [m]"""
+        return self._compute_field(None, lambda mat: mat.transport.props.alpha_L)
+
+    def get_D0_field(self, pressure_function):
+        """D_0: Molecular coefficient [m²/s]"""
+
         phi = self.get_porosity_field()
-        S = self.get_saturation_field(pressure_function)
-        
-        D_eff = Function(self.V)
-        D_eff_data = D_eff.dat.data
-        phi_data = phi.dat.data_ro
-        S_data = S.dat.data_ro
-        
-        for region_name, material in self.domain.materials.items():
-            if material.transport is None:
-                continue
-            
-            mask = self.domain.regions[region_name]
-            transport_model = material.transport
-            
-            for i in np.where(mask)[0]:
-                D_eff_data[i] = transport_model.effective_diffusion(phi_data[i], S_data[i])
-        
-        return D_eff
-    
-    
-    def get_dispersion_field(self, pressure_function, velocity_x, velocity_y):
-        """
-        D_L, D_T: Dispersion coefficients [m²/s]
-        
-        Parameters:
-        -----------
-        pressure_function : Function
-        velocity_x, velocity_y : Function
-            Velocity components
-        
-        Returns:
-        --------
-        (D_L, D_T) : tuple of Functions
-        """
-        
-        phi = self.get_porosity_field()
-        S = self.get_saturation_field(pressure_function)
-        
-        D_L = Function(self.V)
-        D_T = Function(self.V)
-        
-        vx_data = velocity_x.dat.data_ro
-        vy_data = velocity_y.dat.data_ro
-        phi_data = phi.dat.data_ro
-        S_data = S.dat.data_ro
-        
-        for region_name, material in self.domain.materials.items():
-            if material.transport is None:
-                continue
-            
-            mask = self.domain.regions[region_name]
-            transport_model = material.transport
-            
-            for i in np.where(mask)[0]:
-                v = np.array([vx_data[i], vy_data[i]])
-                DL, DT = transport_model.dispersion_coefficients(v, phi_data[i], S_data[i])
-                D_L.dat.data[i] = DL
-                D_T.dat.data[i] = DT
-        
-        return D_L, D_T
-    
+        theta = self.get_theta_field(pressure_function)
+        return self._compute_field((theta, phi), lambda mat, 
+                                   th, phi: mat.transport._D0(th, phi))
+
     # =========================================
     # GEOPHYSICAL FIELDS (Archie's Law)
     # =========================================

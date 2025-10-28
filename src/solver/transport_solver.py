@@ -3,8 +3,8 @@ Advection-Dispersion transport solver
 Solves: ∂(θc)/∂t + ∇·(vc) = ∇·(D∇c) + S
 """
 from firedrake import (
-    Function, TrialFunction, TestFunction, dx, ds, lhs, rhs, solve, min_value,
-    as_matrix, sqrt, grad, dot, conditional, project, VectorFunctionSpace, Constant, as_vector, 
+    Function, TrialFunction, TestFunction, dx, ds, lhs, rhs, solve,
+    as_matrix, sqrt, grad, dot, project, VectorFunctionSpace, Constant, as_vector, 
 )
 import numpy as np
 
@@ -37,10 +37,12 @@ class TransportSolver:
         self.mesh = domain.mesh
         self.V = V
         self.V_vec = VectorFunctionSpace(self.mesh, "CG", 1)  # For velocity
+
         self.field_map = field_map
         self.pressure_solver = pressure_solver
         self.bc_manager = bc_manager
         self.transport_source = transport_source
+        
         self.config = config
         self.debug = debug
         self.dx = dx(domain=self.mesh)
@@ -58,63 +60,55 @@ class TransportSolver:
         """Set initial concentration (default: zero everywhere)"""
         self.c_n.dat.data[:] = 0.0
     
-    def compute_darcy_velocity(self):
+    def compute_darcy_velocity(self, pressure, K):
         """
-        Compute Darcy velocity from pressure field
-        v = -K∇h where h is hydraulic head (pressure in meters)
-        Since Richards solver works with head, we don't add gravity here
+        Compute Darcy velocity from pressure field: v = -K∇(h + z)
+        --------
+        For Richards equation with pressure head p [m]:
+        - Hydraulic head: h = p (pressure already in head units)
+        - Total head including gravity: H = p + z
+        - Darcy velocity: v = -K∇H = -K(∇p + ∇z)
+        
+        In 2D (y = vertical coordinate):
+        - v_x = -K ∂p/∂x
+        - v_y = -K (∂p/∂y + 1)  [the +1 is ∂z/∂y = 1]
         """
-        pressure = self.pressure_solver.p_n
+        # Compute velocity components as UFL expressions
+        vx_expr = -K * grad(pressure)[0]
+        vy_expr = -K * (grad(pressure)[1] + 1.0)
         
-        # Get hydraulic conductivity field
-        k = self.field_map.get_K_field(pressure)
+        # Project to scalar function space
+        vx = project(vx_expr, self.V)
+        vy = project(vy_expr, self.V)
         
-        # Compute v = -K∇h (head already includes elevation effects)
-        vx = project(-k * grad(pressure)[0], self.V)
-        vy = project(-k * (grad(pressure)[1] + 1.0), self.V)  # Add gravity in y-direction
-
-        # Assemble into vector field
-        self.velocity.dat.data[:, 0] = np.maximum(vx.dat.data_ro, 1e-14)
-        self.velocity.dat.data[:, 1] = np.maximum(vy.dat.data_ro, 1e-14)
-
-        # Assemble into vector field
+        # Also update the vector field for advection term
         self.velocity.dat.data[:, 0] = vx.dat.data_ro
         self.velocity.dat.data[:, 1] = vy.dat.data_ro
 
-    def construct_dispersion_tensor(self, D_0, alpha_L, alpha_T, vx, vy):
-        """ 
+        return vx, vy
+
+    def assemble_dispersion_tensor(self, vx, vy, D_0,
+                                  alpha_T, alpha_L,
+                                  cross_dispersion=False):
+        """
+        D: Hydrodynamic dispersion tensor [m²/s]
         Construct the anisotropic dispersion tensor (2D)
         D_ij = D0*δ_ij + |v| * [α_T*δ_ij + (α_L - α_T)*(v_i*v_j / |v|^2)]
-
-        Parameters
-        ----------
-        D0 : float or UFL expression
-            Molecular diffusion coefficient
-        alpha_L, alpha_T : float
-            Longitudinal and transverse dispersivities
-        vx, vy : UFL expressions
-            Velocity components
-
-        Returns
-        -------
-        D_tensor : 2x2 UFL matrix
         """
-        v_mag = sqrt(vx**2 + vy**2 + 1e-10)  # avoid division by zero
+        v_mag = sqrt(vx**2 + vy**2) + 1e-14  # Avoid division by zero
 
-        # Longitudinal–transverse dispersion difference
         dalpha = alpha_L - alpha_T
-
-        # Tensor components
         D_xx = D_0 + v_mag * (alpha_T + dalpha * (vx**2) / (v_mag**2))
         D_yy = D_0 + v_mag * (alpha_T + dalpha * (vy**2) / (v_mag**2))
-        #D_xy = v_mag * dalpha * (vx * vy) / (v_mag**2)
-
-        # Assemble symmetric tensor
-        D_tensor = as_matrix([[D_xx, 0],
-                            [0, D_yy]])
-
+        if cross_dispersion:
+            D_xy = v_mag * dalpha * (vx * vy) / (v_mag**2)
+            D_tensor = as_matrix([[D_xx, D_xy],
+                                  [D_xy, D_yy]])
+        else:
+            D_tensor = as_matrix([[D_xx, 0],
+                                   [0, D_yy]])
         return D_tensor
-
+    
     def solve_timestep(self, t: float):
         """
         Solve transport for one timestep
@@ -123,30 +117,15 @@ class TransportSolver:
         """
         # Step 1: Compute velocity field
         pressure = self.pressure_solver.p_n
-
-        self.compute_darcy_velocity()
+        K = self.field_map.get_K_field(pressure)
+        vx, vy = self.compute_darcy_velocity(pressure, K)
         
         # Step 2: Get transport coefficients from current pressure
-        pressure = self.pressure_solver.p_n
+        D_0 = self.field_map.get_D0_field(pressure)
+        alpha_T = self.field_map.get_alpha_T_field()
+        alpha_L = self.field_map.get_alpha_L_field()
 
-        theta = self.field_map.get_theta_field(pressure)
-        porosity = self.field_map.get_porosity_field()
-
-        tortuosity = theta**(10.0/3.0) / (porosity**2)
-
-
-        #R = self.field_map.get_retardation_field(pressure)
-        
-        # Get dispersion coefficients
-        vx = Function(self.V)
-        vy = Function(self.V)
-        vx.dat.data[:] = self.velocity.dat.data_ro[:, 0]
-        vy.dat.data[:] = self.velocity.dat.data_ro[:, 1]
-        
-        alpha_L = 1  # Longitudinal dispersivity [m]
-        alpha_T = alpha_L/10  # Transverse dispersivity [m]
-        Dd=2.03e-8
-        D_0 = Dd * tortuosity
+        D_eff = self.assemble_dispersion_tensor(vx, vy, D_0, alpha_T, alpha_L)
 
         # Step 3: Get source
         source_expr = self.transport_source.get_flux_expression(t, self.mesh)
@@ -161,7 +140,7 @@ class TransportSolver:
         # Effective storage term (accounts for retardation)
         #storage_coeff = R * theta
         
-        # Time discretization parameter (theta-method)
+        # Time discretization parameter
         theta_time = 1.0  # is backward Euler (implicit, stable)
         dt = Constant(self.config.dt)
 
@@ -175,8 +154,7 @@ class TransportSolver:
         F += - dot(self.velocity, grad(q)) * c_mid * dx
 
         # (3) Dispersion–diffusion term
-        D_tensor = self.construct_dispersion_tensor(D_0, alpha_L, alpha_T, vx, vy)
-        F += dot(dot(D_tensor, grad(c_mid)), grad(q)) * dx
+        F += dot(dot(D_eff, grad(c_mid)), grad(q)) * dx
 
         # (4) Source/sink term
         F += -source_expr * q * dx
@@ -212,102 +190,6 @@ class TransportSolver:
         # Update
         self.c_n.assign(self.c_new)
     
-    def solve_timestep_DG(self, t: float):
-        """DG version of transport solve"""
-        from firedrake import (FacetNormal, jump, avg, conditional, 
-                            dS, CellVolume, FacetArea)
-        
-        # Step 1-2: Same as before (compute velocity, get coefficients)
-        self.compute_darcy_velocity()
-        pressure = self.pressure_solver.p_n
-        theta = self.field_map.get_theta_field(pressure)
-        R = self.field_map.get_retardation_field(pressure)
-        
-        # Get velocity components
-        vx = Function(self.V)
-        vy = Function(self.V)
-        vx.dat.data[:] = self.velocity.dat.data_ro[:, 0]
-        vy.dat.data[:] = self.velocity.dat.data_ro[:, 1]
-        
-        D_L = Constant(5.0e-5)
-        D_T = Constant(5.0e-6)
-        D_tensor = self.construct_dispersion_tensor(D_L, D_T, vx, vy)
-        
-        source_expr = self.transport_source.get_flux_expression(t, self.mesh)
-        
-        # Trial and test functions
-        c = TrialFunction(self.V)
-        q = TestFunction(self.V)
-        
-        storage_coeff = R * theta
-        theta_time = 1.0
-        dt = Constant(self.config.dt)
-        c_mid = theta_time * c + (1.0 - theta_time) * self.c_n
-        
-        # === DG FORMULATION ===
-        
-        # (1) Time derivative (unchanged)
-        F = storage_coeff * (c - self.c_n) / dt * q * dx
-        
-        # (2) ADVECTION with upwind flux
-        n = FacetNormal(self.mesh)
-        v_vec = as_vector([vx, vy])
-        
-        # Volumetric term (integration by parts)
-        F += dot(v_vec, grad(q)) * c_mid * dx
-        
-        # Upwind numerical flux on interior faces
-        v_n = dot(v_vec, n)
-        c_up = conditional(v_n('+') > 0, c_mid('+'), c_mid('-'))
-        F += jump(q) * (v_n('+') * c_up) * dS
-        
-        # Boundary flux (for no-flux boundaries, often zero)
-        # F += q * v_n * c_mid * ds  # Only if you have inflow/outflow
-        
-        # (3) DISPERSION with Interior Penalty (SIPG)
-        h = CellVolume(self.mesh) / FacetArea(self.mesh)
-        alpha = Constant(10.0)  # Penalty parameter - tune if unstable
-        
-        # Volumetric term
-        F += dot(dot(D_tensor, grad(c_mid)), grad(q)) * dx
-        
-        # Interior penalty terms
-        D_avg = avg(D_tensor)
-        F += -dot(avg(dot(D_tensor, grad(c_mid))), jump(q, n)) * dS
-        F += -dot(jump(c_mid, n), avg(dot(D_tensor, grad(q)))) * dS
-        F += (alpha/avg(h)) * dot(jump(c_mid, n), jump(q, n)) * dS
-        
-        # Boundary penalty (if Dirichlet BCs needed)
-        # F += -(dot(dot(D_tensor, grad(c_mid)), n) * q) * ds
-        # F += -(dot(dot(D_tensor, grad(q)), n) * c_mid) * ds
-        # F += (alpha/h) * c_mid * q * ds
-        
-        # (4) Source term (unchanged)
-        F += -source_expr * q * dx
-        
-        # Extract bilinear and linear forms
-        a = lhs(F)
-        L = rhs(F)
-    
-        # Solver parameters (may need adjustment for DG)
-        solver_params = {
-            'ksp_type': 'gmres',
-            'pc_type': 'bjacobi',  # Block Jacobi often better for DG
-            'sub_pc_type': 'ilu',
-            'ksp_rtol': 1e-6,
-            'ksp_atol': 1e-8,
-            'ksp_max_it': 200
-        }
-        
-        solve(a == L, self.c_new, solver_parameters=solver_params)
-    
-        # Non-negativity enforcement (still needed)
-        c_data = self.c_new.dat.data
-        negative_nodes = c_data < 0
-        if negative_nodes.any():
-            c_data[negative_nodes] = 0.0
-        
-        self.c_n.assign(self.c_new)
 
     def run(self, probe_manager=None, snapshot_manager=None):
         """

@@ -5,7 +5,7 @@ Minimal ABC pattern like hydraulic_models.py
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import numpy as np
-
+from firedrake import function
 # ==============================================
 # ABSTRACT BASE CLASS
 # ==============================================
@@ -27,24 +27,8 @@ class TransportModel(ABC):
         pass
 
     @abstractmethod
-    def _D0(self) -> float:
+    def _D0(self, porosity: float, saturation: float) -> float:
         """D0: Molecular diffusion coefficient (including tortuosity) [m²/s]"""
-        pass
-
-    @abstractmethod
-    def _DcL(self) -> float:
-        """DcL: Longitudinal mechanical dispersion coefficient [m²/s]"""
-        pass
-
-    @abstractmethod
-    def _DcT(self) -> float:
-        """DcT: Transverse mechanical dispersion coefficient [m²/s]"""
-        """DcT: Transverse mechanical dispersion coefficient [m²/s]"""
-        pass
-
-    @abstractmethod
-    def _D(self) -> float:
-        """D: Hydrodynamic dispersion coefficient [m²/s]"""
         pass
 
 
@@ -69,7 +53,7 @@ class ContaminantProperties:
     @classmethod
     def chloride(cls, alpha_L: float = 0.01):
         """Cl⁻ - conservative tracer"""
-        return cls(name="Chloride", Dd=2.03e-9, Kd=0.0, alpha_L=alpha_L)
+        return cls(name="Chloride", Dd=2.03e-6, Kd=0.0, alpha_L=alpha_L)
     
     @classmethod
     def sodium(cls, alpha_L: float = 0.01):
@@ -106,7 +90,7 @@ class AnalyticalTransportModel(TransportModel):
         self.props = properties
         self.rho_b = bulk_density
         self.tortuosity_model = tortuosity_model
-    
+
     def _R(self, theta: float) -> float:
         """R = 1 + (ρb/θ) × Kd [-]"""
         if theta < 1e-6:
@@ -124,23 +108,10 @@ class AnalyticalTransportModel(TransportModel):
         else:  # simple
             return theta / porosity if porosity > 0 else 0.0
 
-    def _D0(self, porosity: float, saturation: float) -> float:
+    def _D0(self, theta: float, porosity: float) -> float:
         """D_0 = Dd × τ(θ) [m²/s]"""
-        tau = self._tortuosity(porosity, saturation)
+        tau = self._tortuosity(theta, porosity)
         return self.props.Dd * tau
-    
-    def _DcL(self, porosity: float, saturation: float, v: float) -> float:
-        """DcL = α_L × v [m²/s]"""
-        return self.props.alpha_L * v
-
-    def _DcT(self, porosity: float, saturation: float, v: float) -> float:
-        """DcT = α_T × v [m²/s]"""
-        return self.props.alpha_T * v
-
-    def _D(self, porosity: float, saturation: float) -> float:
-        """D: Hydrodynamic dispersion coefficient [m²/s]"""
-        D_0 = self._D0(porosity, saturation)
-        return D_0
 
 
 # ==============================================
