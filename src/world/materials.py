@@ -31,17 +31,17 @@ def terreau_curve_RAF(Ks=4e-5, porosity=0.3, transport=False):
         transport_model = chloride_transport()
     return Material(hydraulic=hydro_model, Ks=Ks, porosity=porosity, transport=transport_model)
 
-def till(Ks=9e-6):
+def till(Ks=9e-6, porosity=0.4):
     """Till material"""
     vg = VanGenuchtenParams(theta_r=0.08, theta_s=0.41, alpha=3.6, n=1.56)
     model = VanGenuchtenModel(vg)
-    return Material(hydraulic=model, Ks=Ks)
+    return Material(hydraulic=model, Ks=Ks, porosity=porosity)
 
-def terreau(Ks=4e-5):
+def terreau(Ks=4e-5, porosity=0.3):
     """Terreau material"""
     vg = VanGenuchtenParams(theta_r=0.08, theta_s=0.41, alpha=3.6, n=1.56)
     model = VanGenuchtenModel(vg)
-    return Material(hydraulic=model, Ks=Ks)
+    return Material(hydraulic=model, Ks=Ks, porosity=porosity)
 
 def sand(Ks=1e-4):
     """Sand material"""

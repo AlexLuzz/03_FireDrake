@@ -80,7 +80,6 @@ class HydraulicModel(ABC):
         """Moisture capacity: ∂θ/∂p [1/m]"""
         pass
 
-
 # ==============================================
 # VAN GENUCHTEN ANALYTICAL MODEL
 # ==============================================
@@ -226,7 +225,7 @@ class VanGenuchtenModel(HydraulicModel):
             return max(self.Ss, Cm_val)
         else:
             # Unsaturated endpoint at -eps
-            Se_unsat = self._effective_saturation(-eps)
+            Se_unsat = self._Se(-eps)
             term = max(0.0, 1.0 - Se_unsat**(1.0 / m))
             Cm_unsat = ((alpha * m) / (1.0 - m) *
                         (theta_s - theta_r) *

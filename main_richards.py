@@ -11,8 +11,8 @@ def main():
     config = SimulationConfig(
         name="Datetime_Duration",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 10),
-        dt_td=timedelta(hours=6)
+        end_datetime=datetime(2024, 5, 30),
+        dt_td=timedelta(hours=3)
     )
     
     # ==========================================
@@ -40,8 +40,12 @@ def main():
     # ==========================================
     # 4. MATERIALS (properties)
     # ==========================================
-    domain.assign("base", till_curve_RAF())
-    domain.assign("GI", terreau_curve_RAF())
+    domain.assign("base", till()
+                  #till_curve_RAF()
+                  )
+    domain.assign("GI", terreau()
+                  #terreau_curve_RAF()
+                  )
 
     # ==========================================
     # 5. MAPPING (connect materials to domain)

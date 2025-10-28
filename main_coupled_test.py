@@ -117,9 +117,6 @@ def main_transport():
         debug=False  # Turn off debug now that it's working
     )
     
-    # Set initial concentration (clean everywhere)
-    transport.set_initial_concentration(0.0)
-    
     print(f"✓ Transport solver initialized")
     
     # ==========================================

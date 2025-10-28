@@ -58,23 +58,6 @@ class TransportSolver:
         """Set initial concentration (default: zero everywhere)"""
         self.c_n.dat.data[:] = 0.0
     
-    def set_initial_concentration(self, concentration_func):
-        """
-        Set custom initial concentration
-        
-        Parameters:
-        -----------
-        concentration_func : callable or float
-            - If callable: function(x, y) -> concentration
-            - If float: uniform concentration
-        """
-        if callable(concentration_func):
-            coords = self.mesh.coordinates.dat.data_ro
-            for i, (x, y) in enumerate(coords):
-                self.c_n.dat.data[i] = concentration_func(x, y)
-        else:
-            self.c_n.dat.data[:] = float(concentration_func)
-    
     def compute_darcy_velocity(self):
         """
         Compute Darcy velocity from pressure field
@@ -139,10 +122,13 @@ class TransportSolver:
         2. Solve advection-dispersion equation
         """
         # Step 1: Compute velocity field
+        pressure = self.pressure_solver.p_n
+
         self.compute_darcy_velocity()
         
         # Step 2: Get transport coefficients from current pressure
         pressure = self.pressure_solver.p_n
+
         theta = self.field_map.get_theta_field(pressure)
         porosity = self.field_map.get_porosity_field()
 

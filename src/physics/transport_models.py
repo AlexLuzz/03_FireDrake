@@ -15,21 +15,36 @@ class TransportModel(ABC):
     Abstract base class for transport models
     All models must implement these methods
     """
-    
+
     @abstractmethod
-    def effective_diffusion(self, porosity: float, saturation: float) -> float:
-        """D_eff: Effective diffusion coefficient [m²/s]"""
-        pass
-    
-    @abstractmethod
-    def retardation_factor(self, porosity: float, saturation: float) -> float:
+    def _R(self, theta, Kd) -> float:
         """R: Retardation factor [-]"""
         pass
     
     @abstractmethod
-    def dispersion_coefficients(self, velocity: np.ndarray, 
-                                porosity: float, saturation: float) -> tuple:
-        """(D_L, D_T): Longitudinal and transverse dispersion [m²/s]"""
+    def _tortuosity(self, porosity: float, saturation: float) -> float:
+        """τ: Tortuosity factor [-]"""
+        pass
+
+    @abstractmethod
+    def _D0(self) -> float:
+        """D0: Molecular diffusion coefficient (including tortuosity) [m²/s]"""
+        pass
+
+    @abstractmethod
+    def _DcL(self) -> float:
+        """DcL: Longitudinal mechanical dispersion coefficient [m²/s]"""
+        pass
+
+    @abstractmethod
+    def _DcT(self) -> float:
+        """DcT: Transverse mechanical dispersion coefficient [m²/s]"""
+        """DcT: Transverse mechanical dispersion coefficient [m²/s]"""
+        pass
+
+    @abstractmethod
+    def _D(self) -> float:
+        """D: Hydrodynamic dispersion coefficient [m²/s]"""
         pass
 
 
@@ -45,6 +60,7 @@ class ContaminantProperties:
     Kd: float = 0.0         # Sorption coefficient [L/kg]
     alpha_L: float = 0.01   # Longitudinal dispersivity [m]
     alpha_T: float = None   # Transverse dispersivity [m]
+    lambda_: float = 0.0    # Degradation reaction rate coefficient [-]
     
     def __post_init__(self):
         if self.alpha_T is None:
@@ -91,47 +107,40 @@ class AnalyticalTransportModel(TransportModel):
         self.rho_b = bulk_density
         self.tortuosity_model = tortuosity_model
     
-    def tortuosity(self, porosity: float, saturation: float) -> float:
-        """τ: Tortuosity factor [-]"""
-        theta = porosity * saturation
+    def _R(self, theta: float) -> float:
+        """R = 1 + (ρb/θ) × Kd [-]"""
+        if theta < 1e-6:
+            return 1.0
         
+        R = 1.0 + (self.rho_b / theta) * (self.props.Kd * 1e-3)  # L/kg to m³/kg
+        return max(R, 1.0)
+
+    def _tortuosity(self, theta: float, porosity: float) -> float:
+        """τ: Tortuosity factor [-]"""
         if self.tortuosity_model == 'millington_quirk':
             return theta**(10.0/3.0) / (porosity**2) if porosity > 0 else 0.0
         elif self.tortuosity_model == 'bruggeman':
             return theta**1.5
         else:  # simple
             return theta / porosity if porosity > 0 else 0.0
-    
-    def effective_diffusion(self, porosity: float, saturation: float) -> float:
+
+    def _D0(self, porosity: float, saturation: float) -> float:
         """D_0 = Dd × τ(θ) [m²/s]"""
-        tau = self.tortuosity(porosity, saturation)
+        tau = self._tortuosity(porosity, saturation)
         return self.props.Dd * tau
     
-    def retardation_factor(self, porosity: float, saturation: float) -> float:
-        """R = 1 + (ρb/θ) × Kd [-]"""
-        theta = porosity * saturation
-        if theta < 1e-6:
-            return 1.0
-        
-        R = 1.0 + (self.rho_b / theta) * (self.props.Kd * 1e-3)  # L/kg to m³/kg
-        return max(R, 1.0)
-    
-    def dispersion_coefficients(self, velocity: np.ndarray, 
-                                porosity: float, saturation: float) -> tuple:
-        """
-        D_L = α_L |v| + D_0
-        D_T = α_T |v| + D_0
-        
-        Returns: (D_L, D_T) [m²/s]
-        """
-        eps = 1e-12
-        v_mag = np.linalg.norm(velocity)
-        #D_0 = self.effective_diffusion(porosity, saturation)
+    def _DcL(self, porosity: float, saturation: float, v: float) -> float:
+        """DcL = α_L × v [m²/s]"""
+        return self.props.alpha_L * v
 
-        D_L = self.props.alpha_L * v_mag + D_0
-        D_T = self.props.alpha_T * v_mag + D_0
+    def _DcT(self, porosity: float, saturation: float, v: float) -> float:
+        """DcT = α_T × v [m²/s]"""
+        return self.props.alpha_T * v
 
-        return D_L, D_T
+    def _D(self, porosity: float, saturation: float) -> float:
+        """D: Hydrodynamic dispersion coefficient [m²/s]"""
+        D_0 = self._D0(porosity, saturation)
+        return D_0
 
 
 # ==============================================

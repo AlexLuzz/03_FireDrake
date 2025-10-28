@@ -21,12 +21,7 @@ class MaterialField:
         self.V = function_space
         self.transport = transport
         self.geophysics = geophysics
-
-        # Compute static transport fields if needed
-        if self.transport:
-            if not self.has_transport():
-                raise ValueError("No transport models assigned to any materials")
-
+        
         # Geophysical model settings (optional)
         self.archie_params = None
         self.fluid_resistivity = 25.0  # Default clean water [Ω·m]
@@ -140,7 +135,6 @@ class MaterialField:
         """R: Retardation factor [-]
         R = 1 + (ρ_b * K_d) / theta
         """
-
         theta = self.get_theta_field(pressure_function)
         
         R = Function(self.V)
