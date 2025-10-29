@@ -82,8 +82,8 @@ class TransportSolver:
         vy = project(vy_expr, self.V)
         
         # Also update the vector field for advection term
-        self.velocity.dat.data[:, 0] = vx.dat.data_ro
-        self.velocity.dat.data[:, 1] = vy.dat.data_ro
+        self.velocity.dat.data[:, 0] = np.maximum(vx.dat.data_ro, 1e-14)
+        self.velocity.dat.data[:, 1] = np.maximum(vy.dat.data_ro, 1e-14)
 
         return vx, vy
 
@@ -121,7 +121,8 @@ class TransportSolver:
         vx, vy = self.compute_darcy_velocity(pressure, K)
         
         # Step 2: Get transport coefficients from current pressure
-        D_0 = self.field_map.get_D0_field(pressure)
+        #D_0 = self.field_map.get_D0_field(pressure)
+        D_0 = 2e-7
         alpha_T = self.field_map.get_alpha_T_field()
         alpha_L = self.field_map.get_alpha_L_field()
 
@@ -141,20 +142,17 @@ class TransportSolver:
         #storage_coeff = R * theta
         
         # Time discretization parameter
-        theta_time = 1.0  # is backward Euler (implicit, stable)
         dt = Constant(self.config.dt)
-
-        c_mid = theta_time * c + (1.0 - theta_time) * self.c_n
         
         # (1) Time derivative term
         F = (c - self.c_n) / dt * q * dx
 
         # (2) Advection term (conservative form)
         # integrate ∇·(v c) by parts → -∫ c v·∇q + ∫_Γ q c v·n
-        F += - dot(self.velocity, grad(q)) * c_mid * dx
+        F += - dot(self.velocity, grad(q)) * c * dx
 
         # (3) Dispersion–diffusion term
-        F += dot(dot(D_eff, grad(c_mid)), grad(q)) * dx
+        F += dot(dot(D_eff, grad(c)), grad(q)) * dx
 
         # (4) Source/sink term
         F += -source_expr * q * dx

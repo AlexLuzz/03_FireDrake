@@ -42,7 +42,7 @@ class ContaminantProperties:
     name: str
     Dd: float               # Molecular diffusion [m²/s]
     Kd: float = 0.0         # Sorption coefficient [L/kg]
-    alpha_L: float = 0.01   # Longitudinal dispersivity [m]
+    alpha_L: float = 1   # Longitudinal dispersivity [m]
     alpha_T: float = None   # Transverse dispersivity [m]
     lambda_: float = 0.0    # Degradation reaction rate coefficient [-]
     
@@ -53,7 +53,7 @@ class ContaminantProperties:
     @classmethod
     def chloride(cls, alpha_L: float = 0.01):
         """Cl⁻ - conservative tracer"""
-        return cls(name="Chloride", Dd=2.03e-6, Kd=0.0, alpha_L=alpha_L)
+        return cls(name="Chloride", Dd=2.03e-7, Kd=0.0, alpha_L=alpha_L)
     
     @classmethod
     def sodium(cls, alpha_L: float = 0.01):

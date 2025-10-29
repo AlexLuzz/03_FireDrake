@@ -9,14 +9,16 @@ from src import *
 def main_transport():
     """Main coupled flow-transport simulation"""
     
+    t_launch = datetime.now()
+
     # ==========================================
     # 1. CONFIGURATION
     # ==========================================
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 10),
-        dt_td=timedelta(hours=6)  # Smaller timestep for smoother transport curves
+        end_datetime=datetime(2024, 5, 15),
+        dt_td=timedelta(hours=3)  # Smaller timestep for smoother transport curves
     )
     
     # ==========================================
@@ -57,8 +59,8 @@ def main_transport():
     chloride_source.add_event(
         name="deicing_zone",
         start=config.t_end_hours*0.05,
-        end=config.t_end_hours*0.3,
-        rate=0.01,  # Reduced from 1000 to more reasonable level
+        end=config.t_end_hours*0.1,
+        rate=0.1,
         zones="deicing_zone"
     )
     
@@ -197,6 +199,8 @@ def main_transport():
     )
     
     print(f"✓ Chloride visualization saved")
+    total_time = datetime.now() - t_launch
+    print(f"Total simulation time: {total_time}")
 
 if __name__ == "__main__":
     main_transport()

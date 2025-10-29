@@ -3,10 +3,13 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [ ] complete the helper to define chloride source
+    - [ ] Save pdf instead of png, with all parameters
+    - [ ] Compute mass balance over time
+    - [ ] Regroup material libraries in one place, improve logic
 
     ## Medium Priority ⚡
     - [ ] Improve from_library logic, maybe centralize the library
+    - [ ] Hybrid display on results, plot water table / rain mm / salt flux (maybe just tweak the source_term plot)
     - [ ] Implement test script with ANALYTICAL solution for validation
 
     ## Low Priority 💡
@@ -15,6 +18,7 @@
 
 
 ## ✅ Completed
+- [x] Major update of physics/field_maping interaction
 - [x] Correct Result plotter : as is can't not plot measured and comsol ...
 - [x] Update ProbeManager and snapshotManager to be more versatile to compute 
     chloride concentration or conductivity for example

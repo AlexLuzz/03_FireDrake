@@ -2,6 +2,7 @@
 Results visualization
 """
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import matplotlib.dates as mdates
 from matplotlib.gridspec import GridSpec
 import numpy as np
@@ -489,12 +490,11 @@ class ResultsPlotter:
             if field_name == 'water_table':
                 levels = np.linspace(0, 1, 25)
             else:
-                # For concentration, use more levels for smoother appearance and global range
-                levels = np.linspace(vmin_global, vmax_global, 50)
-                
+                levels = np.linspace(0, vmax_global, 25)
+
             cf = ax.contourf(Xi, Yi, Zi, levels=levels,
                             cmap=colormap, vmin=vmin_global, vmax=vmax_global)
-            
+
             if idx == 0:
                 contour_for_cbar = cf
             
@@ -533,20 +533,4 @@ class ResultsPlotter:
         cbar_ax = fig.add_axes([0.92, 0.11, 0.02, 0.56])
         cbar = fig.colorbar(contour_for_cbar, cax=cbar_ax)
         cbar.set_label(f'{field_label}', fontsize=12, fontweight='bold')
-        
-        # Improve colorbar formatting based on field type
-        if field_name == 'concentration':
-            # Format concentration values nicely
-            data_max = max([snapshots[t][field_name].dat.data[:].max() for t in sorted_times])
-            if data_max < 0.1:
-                # Very small values - use scientific notation
-                cbar.formatter.set_powerlimits((-3, -1))
-                cbar.update_ticks()
-            elif data_max < 10:
-                # Small values - use 2 decimal places
-                cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
-            else:
-                # Larger values - use 1 decimal place
-                cbar.ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.1f'))
-        
         cbar.ax.tick_params(labelsize=10)
