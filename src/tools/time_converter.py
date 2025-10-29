@@ -2,10 +2,9 @@
 Time conversion utilities for datetime ↔ seconds conversions
 """
 from datetime import datetime, timedelta
-from typing import Union, Optional, List
+from typing import Union
 import numpy as np
 import pandas as pd
-from .csv_loader import CSVLoader
 
 class TimeConverter:
     """
@@ -46,29 +45,3 @@ class TimeConverter:
         else:
             return float(dt_or_seconds) / 86400.0
 
-    def load_datetime_csv(self, csv_path: str, datetime_column: str = 'Date',
-                         value_columns: Optional[List[str]] = None,
-                         start_datetime: Optional[datetime] = None,
-                         end_datetime: Optional[datetime] = None) -> dict:
-        """Load CSV with datetime column and convert to simulation seconds"""
-        
-        loader = CSVLoader(csv_path, datetime_column)
-        
-        if start_datetime or end_datetime:
-            loader.filter_dates(datetime_column, start_datetime, end_datetime)
-        
-        # Convert to simulation seconds
-        datetimes = loader.get_column(datetime_column)
-        times_seconds = np.array([self.to_seconds(dt) for dt in datetimes])
-        
-        # Build result dictionary
-        result = {'times': times_seconds, 'datetimes': datetimes}
-        
-        # Add value columns
-        if value_columns is None:
-            value_columns = [col for col in loader.columns if col != datetime_column]
-        
-        for col in value_columns:
-            result[col] = loader.get_numeric(col)
-        
-        return result

@@ -4,7 +4,7 @@ Solves: ∂(θc)/∂t + ∇·(vc) = ∇·(D∇c) + S
 """
 from firedrake import (
     Function, TrialFunction, TestFunction, dx, ds, lhs, rhs, solve,
-    as_matrix, sqrt, grad, dot, project, VectorFunctionSpace, Constant, as_vector, 
+    as_matrix, sqrt, grad, dot, project, VectorFunctionSpace, Constant, assemble, 
 )
 import numpy as np
 
@@ -188,7 +188,16 @@ class TransportSolver:
         # Update
         self.c_n.assign(self.c_new)
     
-
+    def compute_mass_balance(self):
+        """
+        Compute total mass in the system for mass balance checking
+        M = ∫ θ c dV
+        """
+        pressure = self.pressure_solver.p_n
+        theta = self.field_map.get_theta_field(pressure)
+        total_mass = assemble(theta * self.c_new * self.dx)
+        return total_mass
+    
     def run(self, probe_manager=None, snapshot_manager=None):
         """
         Run coupled flow-transport simulation
@@ -205,15 +214,22 @@ class TransportSolver:
             probe_manager.record(t, self.c_new, "concentration")
         if snapshot_manager is not None:
             snapshot_manager.record(t, self.c_new, "concentration")
-        
+
+        mass_residual_balance = []
+
         for step in range(self.config.num_steps):
             t += self.config.dt
             
             # Step 1: Solve flow (Richards equation)
             self.pressure_solver.solve_timestep(t)
-            
+
+            m_n = self.compute_mass_balance()
+
             # Step 2: Solve transport
             self.solve_timestep(t)
+
+            m_new = self.compute_mass_balance()
+            mass_residual_balance.append(m_new - m_n)
             
             # Recording
             if probe_manager is not None:
@@ -233,3 +249,4 @@ class TransportSolver:
                       end='', flush=True)
         
         print("\n\nCoupled simulation complete!")
+        print(f"Mass balance residuals (should be near zero):{mass_residual_balance}")

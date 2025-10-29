@@ -3,13 +3,17 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
+    - [ ] Improve plotters logic, it sucks
+    - [ ] D0 problem OR just values too low and mass loss 
+        (i.e. need for fancy darcy post-processing and DG ?)
+
+
     - [ ] FANCY LOADING BAR, no reprint when snapshot, MAYBE ANIMATIONS
     - [ ] Save pdf instead of png, with all parameters
-    - [ ] Compute mass balance over time
-    - [ ] Regroup material libraries in one place, improve logic
-
+    
     ## Medium Priority ⚡
-    - [ ] Improve from_library logic, maybe centralize the library
+    - [ ] Improve functionSpace and boundary conditions declaration logic
+    - [ ] Improve from_library logic, overal material params, maybe centralize the library
     - [ ] Hybrid display on results, plot water table / rain mm / salt flux (maybe just tweak the source_term plot)
     - [ ] Implement test script with ANALYTICAL solution for validation
 

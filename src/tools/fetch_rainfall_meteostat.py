@@ -2,6 +2,7 @@
 Fetch rainfall data from Meteostat and create source term scenario
 """
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from meteostat import Stations, Hourly
 #from setup.source_term import rainfall_scenario
@@ -60,12 +61,20 @@ def plot_scenario(scenario, title='Rainfall_scenario_meteostat', save=True):
     """Plot a single rainfall scenario"""
     fig, ax = plt.subplots(figsize=(12, 5))
     
+    max_rate = 0
     for event in scenario.events:
         if event.rate > 0 and event.start_datetime:
             ax.plot([event.start_datetime, event.end_datetime], 
                    [event.rate, event.rate], linewidth=2)
             ax.fill_between([event.start_datetime, event.end_datetime], 
                           0, event.rate, alpha=0.3)
+            max_rate = max(max_rate, event.rate)
+    
+    # Set reasonable y-axis limits to prevent tick overflow
+    if max_rate > 0:
+        ax.set_ylim(0, max_rate * 1.1)
+        if max_rate > 100:
+            ax.locator_params(axis='y', nbins=6)
     
     ax.set_ylabel('Intensity (mm/hr)')
     ax.set_xlabel('Date')
@@ -81,8 +90,27 @@ def plot_rainfall_intensity(df, title='Rainfall Intensity', save=True, precip_st
     """Plot rainfall intensity from DataFrame"""
     fig, ax = plt.subplots(figsize=(12, 5))
 
-    ax.bar(df['date'], df['precipitation'], color='blue', width=0.2)
-
+    # Clean data and check for extreme values
+    if len(df) > 0 and 'precipitation' in df.columns:
+        precip_data = df['precipitation'].copy()
+        
+        # Remove any invalid values
+        precip_data = precip_data[np.isfinite(precip_data) & (precip_data >= 0)]
+        
+        if len(precip_data) > 0:
+            max_precip = precip_data.max()
+            
+            # Use cleaned data for plotting
+            ax.bar(df['date'], df['precipitation'], color='blue', width=0.2)
+            
+            # Set reasonable y-axis limits and ticks
+            if max_precip > 100:
+                ax.locator_params(axis='y', nbins=6)
+            ax.set_ylim(0, max_precip * 1.1)
+        else:
+            ax.text(0.5, 0.5, 'No valid precipitation data', transform=ax.transAxes,
+                   ha='center', va='center', fontsize=12)
+    
     ax.set_ylabel(f'Intensity (mm/{precip_step}hr)')
     ax.set_xlabel('Date')
     ax.set_title(title)

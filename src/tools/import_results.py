@@ -10,17 +10,8 @@ from pathlib import Path
 from typing import Dict, Optional, Union
 from datetime import datetime
 from scipy.interpolate import interp1d
-
 from .csv_loader import CSVLoader
 from .time_converter import TimeConverter
-
-
-# Default piezometer offsets (edit these as needed)
-DEFAULT_OFFSETS = {
-    'LTC 101': 0.0,
-    'LTC 102': 0.0,
-    'LTC 103': 0.0,
-}
 
 # Default data file paths (edit these as needed)
 DEFAULT_COMSOL_FILE = Path("./data_input/RAF_COMSOL_PZ_CG.csv")
@@ -61,43 +52,31 @@ def hampel_filter(data: np.ndarray, window_size: int = 5, n_sigma: float = 3.0) 
 def load_comsol_data(csv_path: Union[str, Path] = None, 
                      start_from_days: float = 0.0, 
                      sim_duration_days: Optional[float] = None) -> Dict:
-    """
-    Load COMSOL simulation results
-    
-    Args:
-        csv_path: Path to COMSOL CSV file (uses DEFAULT_COMSOL_FILE if None)
-        
-    Returns dict with 'times' (days) and LTC columns
-    """
-    if csv_path is None:
-        csv_path = DEFAULT_COMSOL_FILE
-        
+    """Load COMSOL simulation results"""
+    csv_path = csv_path or DEFAULT_COMSOL_FILE
     loader = CSVLoader(str(csv_path))
     
-    # Find time column
-    time_col = next((col for col in loader.columns 
-                    if any(t in col.lower() for t in ['time', 't'])), None)
+    # Find time column and load data
+    time_col = next((col for col in loader.columns if 'time' in col.lower() or col.lower() == 't'), None)
     if not time_col:
         raise ValueError(f"No time column in {csv_path}")
     
-    time_values = loader.get_numeric(time_col)
+    times = loader.get_numeric(time_col) - start_from_days
     
-    # Filter to simulation period
+    # Filter time range if specified
     if sim_duration_days:
-        end_time = start_from_days + sim_duration_days
-        mask = (time_values >= start_from_days) & (time_values <= end_time)
+        mask = (times >= 0) & (times <= sim_duration_days)
         if not mask.any():
-            raise ValueError(f"No data between {start_from_days} and {end_time} days")
+            raise ValueError(f"No data in range 0 to {sim_duration_days} days")
+        times = times[mask]
         loader.df = loader.df[mask]
-        time_values = time_values[mask]
     
-    # Extract data
-    result = {'times': time_values - start_from_days}
-    for col in loader.columns:
-        if col != time_col and col.upper().startswith('LTC'):
-            result[col] = loader.get_numeric(col)
+    # Extract LTC columns
+    result = {'times': times}
+    result.update({col: loader.get_numeric(col) for col in loader.columns 
+                   if col != time_col and col.upper().startswith('LTC')})
     
-    print(f"✓ COMSOL: {list(result.keys())} ({len(result['times'])} points)")
+    print(f"✓ COMSOL: {list(result.keys())} ({len(times)} points)")
     return result
 
 
@@ -106,34 +85,18 @@ def load_measured_data(csv_path: Union[str, Path] = None,
                       start_datetime: Optional[datetime] = None,
                       end_datetime: Optional[datetime] = None,
                       offsets: Optional[Dict[str, float]] = None,
-                      smooth_window: int = 4,
-                      hampel_window: int = 5,
-                      hampel_sigma: float = 3.0) -> Dict:
-    """
-    Load field measurement data with filtering and smoothing
+                      smooth_window: int = 6,
+                      hampel_window: int = 120) -> Dict:
+    """Load field measurement data with filtering and smoothing"""
+    csv_path = csv_path or DEFAULT_MEASURED_FILE
+    offsets = offsets or DEFAULT_MEASURED_OFFSETS
     
-    Args:
-        csv_path: Path to measured CSV file (uses DEFAULT_MEASURED_FILE if None)
-        offsets: Custom offsets dict (uses DEFAULT_MEASURED_OFFSETS if None)
-        smooth_window: Sliding window for smoothing (0 to disable)
-        hampel_window: Window for Hampel filter (0 to disable)
-        hampel_sigma: Outlier threshold in sigmas
-    
-    Returns dict with 'times' (days), 'datetimes', and LTC columns
-    """
-    if csv_path is None:
-        csv_path = DEFAULT_MEASURED_FILE
-    if offsets is None:
-        offsets = DEFAULT_MEASURED_OFFSETS
-    
-    # Find datetime column
-    loader_temp = CSVLoader(str(csv_path))
-    datetime_col = next((col for col in loader_temp.columns 
-                        if any(t in col.lower() for t in ['time', 'date'])), None)
+    # Find and load datetime column
+    temp_loader = CSVLoader(str(csv_path))
+    datetime_col = next((col for col in temp_loader.columns if 'time' in col.lower() or 'date' in col.lower()), None)
     if not datetime_col:
         raise ValueError(f"No datetime column in {csv_path}")
     
-    # Load with datetime index
     loader = CSVLoader(str(csv_path), datetime_col)
     if start_datetime or end_datetime:
         loader.filter_dates(start_datetime, end_datetime)
@@ -141,17 +104,16 @@ def load_measured_data(csv_path: Union[str, Path] = None,
     # Convert times
     datetimes = loader.get_datetimes()
     sim_times = np.array([time_converter.to_seconds(dt) / 86400.0 for dt in datetimes])
-    
     result = {'times': sim_times, 'datetimes': datetimes}
     
-    # Process each data column
+    # Process data columns
     for col in loader.columns:
         if col == datetime_col:
             continue
-        
-        # Standardize names: "Level 101" -> "LTC 101"
+            
+        # Standardize column names
+        import re
         if 'level' in col.lower():
-            import re
             match = re.search(r'(\d+)', col)
             name = f"LTC {match.group(1)}" if match else col
         elif col.upper().startswith('LTC'):
@@ -161,19 +123,13 @@ def load_measured_data(csv_path: Union[str, Path] = None,
         
         values = loader.get_numeric(col)
         
-        # 1. Hampel filter (remove outliers)
+        # Apply filters
         if hampel_window > 0:
-            values = hampel_filter(values, window_size=hampel_window, n_sigma=hampel_sigma)
-        
-        # 2. Smooth (reduce noise)
+            values = hampel_filter(values, window_size=hampel_window)
         if smooth_window > 1:
-            values = pd.Series(values).rolling(
-                smooth_window, center=True, min_periods=1
-            ).mean().values
-        
-        # 3. Apply offset
+            values = pd.Series(values).rolling(smooth_window, center=True, min_periods=1).mean().values
         if name in offsets and offsets[name] != 0:
-            values = values + offsets[name]
+            values += offsets[name]
             print(f"  {name}: {offsets[name]:+.3f}m offset")
         
         result[name] = values
@@ -182,69 +138,91 @@ def load_measured_data(csv_path: Union[str, Path] = None,
     return result
 
 
-def calculate_residuals(simulation_data: Dict, reference_data: Dict) -> Dict:
+def calculate_residuals(data_a: Dict, data_b: Dict) -> Dict:
     """Calculate residuals: simulation - reference (interpolated to sim times)"""
-    residuals = {'times': simulation_data['times']}
+    residuals = {'times': data_a['times']}
     
-    for key in simulation_data.keys():
-        if key != 'times' and key in reference_data:
+    for key in data_a.keys():
+        if key != 'times' and key in data_b:
             # Interpolate reference to simulation times
             interp_func = interp1d(
-                reference_data['times'], reference_data[key],
+                data_b['times'], data_b[key],
                 kind='linear', bounds_error=False, fill_value=np.nan
             )
-            ref_interp = interp_func(simulation_data['times'])
-            residuals[key] = simulation_data[key] - ref_interp
+            ref_interp = interp_func(data_a['times'])
+            residuals[key] = data_a[key] - ref_interp
     
     return residuals
 
 
-def preview_data(comsol_data: Optional[Dict] = None,
+def preview_data(comsol_data: Optional[Dict],
                 measured_data: Optional[Dict] = None,
                 time_converter: Optional[TimeConverter] = None,
+                use_datetime: bool = True,
                 figsize=(12, 8)) -> plt.Figure:
     """Quick visualization of loaded data"""
     fig, ax = plt.subplots(figsize=figsize)
     colors = ['#1f77b4', '#2ca02c', '#d62728', '#ff7f0e', '#9467bd']
     
-    # Plot COMSOL
+    # Helper function to get x-axis data
+    def get_x_data(data_dict, is_comsol=False):
+        if not use_datetime or not time_converter:
+            return data_dict['times']
+        
+        if is_comsol:
+            # Convert COMSOL times (days) to datetime
+            return [time_converter.to_datetime(t * 86400) for t in data_dict['times']]
+        else:
+            # Use measured datetimes, filter out pre-2020 data
+            if 'datetimes' in data_dict:
+                cutoff = datetime(2020, 1, 1)
+                return [dt for dt in pd.to_datetime(data_dict['datetimes']) if dt >= cutoff]
+            return data_dict['times']
+    
+    # Helper function to filter y-data for measured data
+    def filter_y_data(x_data, y_data, original_times):
+        if not use_datetime or len(x_data) == len(y_data):
+            return y_data
+        # Match filtered x_data length
+        cutoff = datetime(2020, 1, 1)
+        mask = np.array([dt >= cutoff for dt in pd.to_datetime(original_times)])
+        return y_data[mask] if len(y_data) == len(mask) else y_data
+    
+    # Plot COMSOL data
     if comsol_data:
+        x_comsol = get_x_data(comsol_data, is_comsol=True)
         for i, (key, values) in enumerate(comsol_data.items()):
             if key != 'times':
-                ax.plot(comsol_data['times'], values, 
-                       color=colors[i % len(colors)], linestyle='--', 
-                       linewidth=2, label=f'{key} (COMSOL)', alpha=0.8)
+                ax.plot(x_comsol, values, color=colors[i % len(colors)], 
+                       linestyle='--', linewidth=2, label=f'{key} (COMSOL)', alpha=0.8)
     
-    # Plot measured
+    # Plot measured data
     if measured_data:
-        use_datetime = 'datetimes' in measured_data and time_converter
-        
+        x_measured = get_x_data(measured_data, is_comsol=False)
         for i, (key, values) in enumerate(measured_data.items()):
-            if key in ['times', 'datetimes']:
-                continue
-            
-            if use_datetime:
-                x = [time_converter.to_datetime(t * 86400) for t in measured_data['times']]
-            else:
-                x = measured_data['times']
-            
-            ax.plot(x, values, color=colors[i % len(colors)], 
-                   linestyle=':', linewidth=1.5, marker='o', markersize=2,
-                   label=f'{key} (Measured)', alpha=0.7)
+            if key not in ['times', 'datetimes']:
+                y_filtered = filter_y_data(x_measured, values, 
+                                         measured_data.get('datetimes', measured_data['times']))
+                ax.plot(x_measured[:len(y_filtered)], y_filtered, 
+                       color=colors[i % len(colors)], linestyle=':', linewidth=1.5, 
+                       marker='o', markersize=2, label=f'{key} (Measured)', alpha=0.7)
     
-    # Format
+    # Format axes
     ax.set_ylabel('Water Table Elevation (m)', fontweight='bold')
     ax.grid(True, alpha=0.3)
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     
-    if measured_data and 'datetimes' in measured_data and time_converter:
+    if use_datetime and time_converter:
         ax.set_xlabel('Date', fontweight='bold')
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-        ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
+        ax.xaxis.set_major_locator(mdates.DayLocator(interval=7))
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
     else:
         ax.set_xlabel('Time (days)', fontweight='bold')
     
     plt.title('Data Preview', fontweight='bold', fontsize=14)
     plt.tight_layout()
+    plt.savefig("data_preview.png", dpi=300, bbox_inches='tight')
     return fig
+
+

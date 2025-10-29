@@ -17,7 +17,7 @@ def main_transport():
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 15),
+        end_datetime=datetime(2024, 5, 10),
         dt_td=timedelta(hours=3)  # Smaller timestep for smoother transport curves
     )
     
@@ -83,14 +83,14 @@ def main_transport():
     # ==========================================
     V = FunctionSpace(domain.mesh, "CG", 1)
     field_map = MaterialField(domain, V)
-    
+        
     # ==========================================
     # 7. BOUNDARY CONDITIONS (Flow)
     # ==========================================
     bc_manager = BoundaryConditionManager(
         V,
-        left_wt=2.5,
-        right_wt=4
+        left_wt=3,
+        right_wt=4.5
     )
     
     # ==========================================
@@ -116,10 +116,8 @@ def main_transport():
         bc_manager=None,  # No transport BCs for now
         transport_source=chloride_source,  # Chloride affects transport
         config=config,
-        debug=False  # Turn off debug now that it's working
+        debug=False  # Turn off debug for cleaner output
     )
-    
-    print(f"✓ Transport solver initialized")
     
     # ==========================================
     # 10. MONITORING SETUP
@@ -183,14 +181,12 @@ def main_transport():
     
     # Configure chloride-specific plotting (no COMSOL/measured comparisons for chloride)
     plotting_config = {
-        'time_series': True,
-        'plot_comsol_comparison': False,    # No chloride reference data available
-        'plot_measured_comparison': False,  # No chloride reference data available
-        'plot_snapshots': True,             # Show chloride concentration plumes
-        'field_name': 'concentration',      # Monitor concentration instead of water table
-        'field_units': 'mg/L',              # Concentration units
-        'field_label': 'Chloride Concentration',
-        'colormap': 'Spectral_r'            # Meaningful colormap for concentration
+        'time_series_fields': ['concentration'],  # Changed from old API
+        'plot_comsol_comparison': False,          # No chloride reference data available
+        'plot_measured_comparison': False,        # No chloride reference data available
+        'plot_snapshots': True,                   # Show chloride concentration plumes
+        'snapshot_fields': ['concentration'],     # Changed from old API
+        'snapshot_overlay': False                 # Added for new API
     }
     
     plotter.plot_complete_results(
@@ -199,8 +195,6 @@ def main_transport():
     )
     
     print(f"✓ Chloride visualization saved")
-    total_time = datetime.now() - t_launch
-    print(f"Total simulation time: {total_time}")
 
 if __name__ == "__main__":
     main_transport()

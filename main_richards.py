@@ -11,7 +11,7 @@ def main():
     config = SimulationConfig(
         name="Datetime_Duration",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 30),
+        end_datetime=datetime(2024, 5, 15),
         dt_td=timedelta(hours=3)
     )
     
@@ -109,10 +109,12 @@ def main():
     
     # Configure what to plot
     plotting_config = {
-        'time_series': True,
-        'plot_comsol_comparison': False,     # Uses default COMSOL file from import_results.py
-        'plot_measured_comparison': False,   # Uses default measured file from import_results.py
-        'plot_snapshots': True              # Will plot if snapshot_manager has data
+        'time_series_fields': ['water_table'],      # Water table elevation
+        'plot_comsol_comparison': False,            # Set to True to use default COMSOL file
+        'plot_measured_comparison': False,          # Set to True to use default measured file
+        'plot_snapshots': True,                     # Snapshot plots if data available
+        'snapshot_fields': ['water_table'],         # Fields to show in snapshots
+        'snapshot_overlay': False                   # Single field snapshots
     }
     
     # Optional: Override defaults if needed
