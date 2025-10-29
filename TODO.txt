@@ -3,6 +3,7 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
+    - [ ] FANCY LOADING BAR, no reprint when snapshot, MAYBE ANIMATIONS
     - [ ] Save pdf instead of png, with all parameters
     - [ ] Compute mass balance over time
     - [ ] Regroup material libraries in one place, improve logic
