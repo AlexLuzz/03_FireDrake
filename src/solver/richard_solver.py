@@ -3,6 +3,8 @@ from firedrake import (
     as_vector, grad, dot
 )
 
+from ..tools.tools import loading_bar, fancy_loading_bar
+
 class RichardsSolver:
     def __init__(self, domain, V, field_map, source_scenario, bc_manager, config):
         self.mesh = domain.mesh  # Use domain's mesh
@@ -24,8 +26,8 @@ class RichardsSolver:
     
     def solve_timestep(self, t: float):
         # Update coefficients from current pressure
-        Cm_n = self.field_map.get_Cm_field(self.p_n)
-        K_n = self.field_map.get_K_field(self.p_n)
+        Cm = self.field_map.get_Cm_field(self.p_n)
+        K = self.field_map.get_K_field(self.p_n)
 
         bcs = self.bc_manager.get_dirichlet_bcs(t)
         rain_flux = -self.source_scenario.get_flux_expression(t, self.mesh)
@@ -36,9 +38,9 @@ class RichardsSolver:
         gravity = as_vector([0, 1])
 
         F = (
-            Cm_n * (p - self.p_n) / self.config.dt * q * dx +
-            K_n * dot(grad(p), grad(q)) * dx +
-            K_n * dot(gravity, grad(q)) * dx +
+            Cm * (p - self.p_n) / self.config.dt * q * dx +
+            K * dot(grad(p), grad(q)) * dx +
+            K * dot(gravity, grad(q)) * dx +
             rain_flux * q * ds(4)
         )
 
@@ -60,10 +62,8 @@ class RichardsSolver:
             probe_manager.record_water_table(0.0, self.p_n)
         if snapshot_manager is not None:
             if snapshot_manager.should_record(0.0, self.config.dt):
-                snapshot_manager.record(0.0, self.p_n, "pressure")
-                # Also record initial saturation
                 Se = self.field_map.get_Se_field(self.p_n)
-                snapshot_manager.record(0.0, Se, "saturation")
+                snapshot_manager.record(0.0, Se, "saturation", verbose=False)
 
         t = 0.0
         for step in range(self.config.num_steps):
@@ -78,19 +78,11 @@ class RichardsSolver:
             # Record snapshots
             if snapshot_manager is not None:
                 if snapshot_manager.should_record(t, self.config.dt):
-                    snapshot_manager.record(t, self.p_new, "pressure")
-                    
-                    # Also record saturation
                     Se = self.field_map.get_Se_field(self.p_new)
-                    snapshot_manager.record(t, Se, "saturation")
+                    snapshot_manager.record(t, Se, "saturation", verbose=False)
 
-            if step % max(1, int(0.05 * self.config.num_steps)) == 0:
-                progress = step / self.config.num_steps
-                bar_length = 40
-                filled_length = int(bar_length * progress)
-                bar = '█' * filled_length + '░' * (bar_length - filled_length)
-                print(f"\rProgress: [{bar}] {progress*100:.1f}% | "
-                      f"Time: {t/3600:.1f}h / {self.config.t_end/3600:.1f}h", 
-                      end='', flush=True)
+            # Loading bar
+            loading_bar(step, t, self.config)
+            #
         
         print("\n\nSimulation complete!")

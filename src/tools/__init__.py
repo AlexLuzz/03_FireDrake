@@ -8,6 +8,8 @@ from .fetch_rainfall_meteostat import fetch_and_aggregate_weather, plot_scenario
 from .import_results import (load_comsol_data, load_measured_data, calculate_residuals, preview_data,
                             DEFAULT_COMSOL_FILE, DEFAULT_MEASURED_FILE, DEFAULT_COMSOL_REF_DATE)
 from .time_converter import TimeConverter
+from .tools import loading_bar, fancy_loading_bar
+
 __all__ = [
     # csv_loader.py
     'CSVLoader',
@@ -28,5 +30,9 @@ __all__ = [
 
     # time_converter.py
     'TimeConverter',
+
+    # tools.py
+    'loading_bar',
+    'fancy_loading_bar',
 
 ]

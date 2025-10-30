@@ -185,7 +185,7 @@ class SnapshotManager:
                 return True
         return False
     
-    def record(self, t: float, field, field_name: str = "field"):
+    def record(self, t: float, field, field_name: str = "field", verbose: bool = True):
         """
         Record a field snapshot (GENERIC)
         
@@ -205,8 +205,9 @@ class SnapshotManager:
         
         # Print stats
         vals = field.dat.data_ro
-        print(f"  Snapshot at t={t/3600:.2f}h | {field_name}: [{vals.min():.3f}, {vals.max():.3f}]")
-    
+        if verbose:
+            print(f"  Snapshot at t={t/3600:.2f}h | {field_name}: [{vals.min():.3f}, {vals.max():.3f}]")
+
     def get_snapshot(self, t: float, field_name: str):
         """Get a specific field at a specific time"""
         return self.snapshots.get(t, {}).get(field_name)

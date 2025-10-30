@@ -5,9 +5,6 @@
     ## High Priority 🔥
     - [ ] D0 problem OR just values too low and mass loss 
         (i.e. need for fancy darcy post-processing and DG ?)
-
-
-    - [ ] FANCY LOADING BAR, no reprint when snapshot, MAYBE ANIMATIONS
     - [ ] Save pdf instead of png, with all parameters
     
     ## Medium Priority ⚡
