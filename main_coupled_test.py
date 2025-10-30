@@ -18,7 +18,7 @@ def main_transport():
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 15),
+        end_datetime=datetime(2024, 6, 30),
         dt_td=timedelta(hours=6)  # Smaller timestep for smoother transport curves
     )
     

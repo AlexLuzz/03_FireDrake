@@ -9,7 +9,7 @@
     
     ## Medium Priority ⚡
     - [ ] Improve functionSpace and boundary conditions declaration logic
-    - [ ] Improve from_library logic, overal material params, maybe centralize the library
+    - [x-ish] Improve from_library logic, overal material params, maybe centralize the library
     - [ ] Hybrid display on results, plot water table / rain mm / salt flux (maybe just tweak the source_term plot)
     - [ ] Implement test script with ANALYTICAL solution for validation
 

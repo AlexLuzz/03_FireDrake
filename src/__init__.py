@@ -13,14 +13,19 @@ Main modules:
 - tools: Utility functions for data handling and conversion
 """
 
+# Soils and contaminants library
+from .library import (
+    SoilParameters,
+    ContaminantProperties,
+    HydraulicCurves
+)
+
 # Core physics modules
 from .physics import (
     VanGenuchtenModel,
     CurveBasedHydraulicModel,
-    HydraulicCurves,
     AnalyticalTransportModel,
     archie_resistivity,
-    chloride_transport,
 )
 
 # Setup and configuration
@@ -68,17 +73,20 @@ __version__ = "0.1.0"
 
 # Define what gets imported with "from firedrake_sim import *"
 __all__ = [
+    # Library   
+    'SoilParameters',
+    'ContaminantProperties',
+    'HydraulicCurves',
+
     # Physics
     'Domain',
     'MaterialField',
     'VanGenuchtenModel', 
     'CurveBasedHydraulicModel',
-    'HydraulicCurves',
     'till',
     'terreau',
     'AnalyticalTransportModel',
     'archie_resistivity',
-    'chloride_transport',
     
     # Setup
     'SimulationConfig',

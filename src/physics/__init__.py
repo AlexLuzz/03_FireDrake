@@ -1,13 +1,9 @@
-from .curve_tools import HydraulicCurves
 from .geophysical_models import archie_resistivity
 from .hydraulic_models import VanGenuchtenModel, CurveBasedHydraulicModel
-from .transport_models import AnalyticalTransportModel, chloride_transport
+from .transport_models import AnalyticalTransportModel
 
 
 __all__ = [
-    # curve_tools
-    'HydraulicCurves',
-
     # geophysical_models
     'archie_resistivity',
 
@@ -17,5 +13,4 @@ __all__ = [
 
     # transport_models
     'AnalyticalTransportModel',
-    'chloride_transport',
 ]

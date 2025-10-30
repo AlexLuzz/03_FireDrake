@@ -2,8 +2,9 @@
 Transport models for solute transport
 Minimal ABC pattern like hydraulic_models.py
 """
-from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from src.library.contaminants import ContaminantProperties
+
 # ==============================================
 # ABSTRACT BASE CLASS
 # ==============================================
@@ -28,40 +29,6 @@ class TransportModel(ABC):
     def _D0(self, porosity: float, saturation: float) -> float:
         """D0: Molecular diffusion coefficient (including tortuosity) [m²/s]"""
         pass
-
-
-# ==============================================
-# CONTAMINANT PROPERTIES
-# ==============================================
-
-@dataclass
-class ContaminantProperties:
-    """Physical/chemical properties of contaminants"""
-    name: str
-    Dd: float               # Molecular diffusion [m²/s]
-    Kd: float = 0.0         # Sorption coefficient [L/kg]
-    alpha_L: float = 1   # Longitudinal dispersivity [m]
-    alpha_T: float = None   # Transverse dispersivity [m]
-    lambda_: float = 0.0    # Degradation reaction rate coefficient [-]
-    
-    def __post_init__(self):
-        if self.alpha_T is None:
-            self.alpha_T = self.alpha_L / 10.0
-    
-    @classmethod
-    def chloride(cls, alpha_L: float = 0.01):
-        """Cl⁻ - conservative tracer"""
-        return cls(name="Chloride", Dd=2.03e-6, Kd=0.0, alpha_L=alpha_L)
-    
-    @classmethod
-    def sodium(cls, alpha_L: float = 0.01):
-        """Na⁺"""
-        return cls(name="Sodium", Dd=1.33e-9, Kd=0.5, alpha_L=alpha_L)
-    
-    @classmethod
-    def calcium(cls, alpha_L: float = 0.01):
-        """Ca²⁺"""
-        return cls(name="Calcium", Dd=0.79e-9, Kd=2.0, alpha_L=alpha_L)
 
 
 # ==============================================
@@ -110,23 +77,3 @@ class AnalyticalTransportModel(TransportModel):
         """D_0 = Dd × τ(θ) [m²/s]"""
         tau = self._tortuosity(theta, porosity)
         return self.props.Dd * tau
-
-
-# ==============================================
-# MATERIAL FACTORIES
-# ==============================================
-
-def chloride_transport(alpha_L: float = 0.01, bulk_density: float = 1600.0):
-    """Conservative tracer (Cl⁻)"""
-    props = ContaminantProperties.chloride(alpha_L)
-    return AnalyticalTransportModel(props, bulk_density)
-
-def sodium_transport(alpha_L: float = 0.01, bulk_density: float = 1600.0):
-    """Sodium (Na⁺) with sorption"""
-    props = ContaminantProperties.sodium(alpha_L)
-    return AnalyticalTransportModel(props, bulk_density)
-
-def calcium_transport(alpha_L: float = 0.01, bulk_density: float = 1600.0):
-    """Calcium (Ca²⁺) with sorption"""
-    props = ContaminantProperties.calcium(alpha_L)
-    return AnalyticalTransportModel(props, bulk_density)

@@ -41,7 +41,7 @@ custom_model = CurveBasedHydraulicModel.from_data(
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import numpy as np
-from .curve_tools import CurveData, CurveInterpolator, HydraulicCurves
+from .curve_tools import CurveData, CurveInterpolator
 
 # ==============================================
 # ABSTRACT BASE CLASS
@@ -350,6 +350,9 @@ class CurveBasedHydraulicModel(HydraulicModel):
             Window size for smoothing (1 = no smoothing)
         **kwargs : additional parameters for __init__
         """
+        # Import here to avoid circular dependency
+        from ..library.soils_from_curve import HydraulicCurves
+        
         soil_type = soil_type.lower()
         
         if soil_type == "till":
