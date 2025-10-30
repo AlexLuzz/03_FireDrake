@@ -443,46 +443,44 @@ class ResultsPlotter:
             rain_times = []
             rain_intensities = []
             
-            for event in self.rain_scenario.events:
-                if use_datetime:
-                    start_dt = event.start_datetime
-                    end_dt = event.end_datetime
-                    if start_dt and end_dt:
-                        rain_times.append(start_dt)
-                        rain_times.append(end_dt)
-                        intensity = event.rate * 3600 * 1000  # m/s to mm/hr
-                        rain_intensities.append(intensity)
-                        rain_intensities.append(intensity)
-                else:
-                    start_time = event.start / 3600.0
-                    end_time = event.end / 3600.0
-                    rain_times.append(start_time)
-                    rain_times.append(end_time)
-                    intensity = event.rate * 3600 * 1000
-                    rain_intensities.append(intensity)
-                    rain_intensities.append(intensity)
+            sorted_events = sorted(self.rain_scenario.events, key=lambda e: e.start)
             
-            if rain_times:
-                ax_rain.fill_between(
-                    rain_times, 0, rain_intensities,
-                    step='post', alpha=0.3, color='skyblue', 
-                    label='Rain Intensity'
-                )
-                ax_rain.plot(
-                    rain_times, rain_intensities,
-                    drawstyle='steps-post', color='steelblue', 
-                    linewidth=2, alpha=0.7
-                )
+            for i, event in enumerate(sorted_events):
+                # Get time values in plot units
+                if use_datetime:
+                    t_start, t_end = event.start_datetime, event.end_datetime
+                else:
+                    t_start, t_end = event.start / 3600.0, event.end / 3600.0
                 
-                ax_rain.set_ylabel('Rain Intensity (mm/hr)', 
-                                  fontsize=11, fontweight='bold', color='steelblue')
+                # Insert zero gap before event if needed
+                if i > 0:
+                    prev_end = sorted_events[i-1].end_datetime if use_datetime else sorted_events[i-1].end / 3600.0
+                    if t_start > prev_end:
+                        rain_times.extend([prev_end, t_start])
+                        rain_intensities.extend([0, 0])
+                
+                # Add event
+                rain_times.extend([t_start, t_end])
+                rain_intensities.extend([event.rate, event.rate])
+            
+            # Add zero after last event
+            if rain_times:
+                rain_times.append(rain_times[-1])
+                rain_intensities.append(0)
+                
+                ax_rain.fill_between(rain_times, 0, rain_intensities,
+                                    step='post', alpha=0.3, color='skyblue', label='Rain Intensity')
+                ax_rain.plot(rain_times, rain_intensities,
+                            drawstyle='steps-post', color='steelblue', linewidth=2, alpha=0.7)
+                
+                ax_rain.set_ylabel('Rain Intensity (mm/hr)', fontsize=11, fontweight='bold', color='steelblue')
                 ax_rain.tick_params(axis='y', labelcolor='steelblue')
                 ax_rain.set_ylim(bottom=0)
                 
                 lines, labels = ax.get_legend_handles_labels()
                 lines2, labels2 = ax_rain.get_legend_handles_labels()
                 ax.legend(lines + lines2, labels + labels2,
-                         loc='upper left', bbox_to_anchor=(0.02, 0.98), fontsize=10)
+                        loc='upper left', bbox_to_anchor=(0.02, 0.98), fontsize=10)
         
         # Set labels
         ylabel = f'{field_cfg.label} ({field_cfg.units})'

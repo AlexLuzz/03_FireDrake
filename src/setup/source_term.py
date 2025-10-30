@@ -339,17 +339,24 @@ def rainfall_scenario(domain_length: float = None, events: list = None, time_uni
             times = loader.get_datetimes()
             time_converter = TimeConverter(pd.Timestamp(times[0]).to_pydatetime())
             
-            # Auto-compute intensities from accumulated values and time differences
+            # Get rainfall data
             rain_values = loader.get_numeric(rain_col)
             
-            # Calculate time differences in hours
-            time_diffs = pd.Series(times).diff().dt.total_seconds() / 3600
-            time_diffs.iloc[0] = time_diffs.iloc[1] if len(time_diffs) > 1 else 1.0
-            
-            # Convert accumulated mm to mm/hr intensity
-            intensities = rain_values / time_diffs.values
-            
-            print(f"✓ Auto-computed intensities from datetime (time steps: {time_diffs.iloc[0]:.1f}h)")
+            # Convert to mm/hour based on rain_unit (if specified) or auto-compute
+            if rain_unit and 'day' in rain_unit.lower():
+                # User specified daily data - simple division by 24
+                intensities = rain_values / 24.0
+                print(f"✓ Using specified rain_unit: {rain_unit} (converted to mm/hr)")
+            elif rain_unit and 'hour' in rain_unit.lower():
+                # Already in hourly units
+                intensities = rain_values
+                print(f"✓ Using specified rain_unit: {rain_unit}")
+            else:
+                # Auto-compute from time differences (legacy behavior)
+                time_diffs = pd.Series(times).diff().dt.total_seconds() / 3600
+                time_diffs.iloc[0] = time_diffs.iloc[1] if len(time_diffs) > 1 else 1.0
+                intensities = rain_values / time_diffs.values
+                print(f"✓ Auto-computed intensities from datetime (time steps: {time_diffs.iloc[0]:.1f}h)")
         else:
             # Numeric time column - user must specify rain_unit
             if rain_unit is None:
@@ -385,63 +392,62 @@ def rainfall_scenario(domain_length: float = None, events: list = None, time_uni
 
 def _create_rain_events(scenario: SourceScenario, times, intensities, time_converter=None):
     """
-    Helper to create events from time series data.
-    
-    Each event has CONSTANT intensity over its duration (no time variation).
-    When intensity changes in the CSV, a new event is created.
+    Simple logic: go through each timestep, create event when rain > threshold.
+    Each event spans exactly one timestep (e.g., one day for daily data).
     """
-    in_event = False
-    event_start_idx = None
-    current_intensity = 0.0
     
-    def add_event(start_idx, end_idx, intensity):
-        """Add a single rain event with CONSTANT intensity"""
-        if time_converter:
-            start_sec = time_converter.to_seconds(times[start_idx])
-            end_sec = time_converter.to_seconds(times[end_idx])
-            start_dt = times[start_idx]
-            end_dt = times[end_idx]
-        else:
-            start_sec = times[start_idx] * 86400
-            end_sec = times[end_idx] * 86400
-            start_dt = None
-            end_dt = None
-        
-        scenario.add_event(
-            f"rain_event_{len(scenario.events)}",
-            start_sec / scenario._units[scenario.time_unit],
-            end_sec / scenario._units[scenario.time_unit],
-            intensity,  # CONSTANT intensity over [start, end]
-            list(scenario.zones),
-            # No profile parameter = constant flux (like old RainEvent)
-            start_datetime=start_dt,
-            end_datetime=end_dt
-        )
-    
-    # Minimum rain intensity threshold (mm/hr) - ignore very light precipitation
-    min_intensity_threshold = 0.3  # Only create events for rain >= 0.3 mm/hr
+    # Minimum rain intensity threshold (mm/hr)
+    min_intensity_threshold = 0.1
     
     for i, intensity in enumerate(intensities):
-        # Start new event (only if above threshold)
-        if intensity >= min_intensity_threshold and not in_event:
-            in_event = True
-            event_start_idx = i
-            current_intensity = intensity
-        
-        # End event (when below threshold)
-        elif intensity < min_intensity_threshold and in_event:
-            add_event(event_start_idx, i, current_intensity)
-            in_event = False
-        
-        # Intensity changed significantly - close old event, start new
-        elif in_event and abs(intensity - current_intensity) > 0.1:  # 0.1 mm/hr threshold for changes
-            add_event(event_start_idx, i, current_intensity)
-            event_start_idx = i
-            current_intensity = intensity
-    
-    # Close final event if still active
-    if in_event:
-        add_event(event_start_idx, len(times) - 1, current_intensity)
+        # Create event for this timestep if above threshold
+        if intensity >= min_intensity_threshold:
+            
+            # Calculate timestep boundaries
+            if time_converter:
+                # For datetime data
+                start_time = times[i]
+                if i + 1 < len(times):
+                    end_time = times[i + 1]  # Next timestep
+                else:
+                    # Last timestep - estimate duration from previous interval
+                    if i > 0:
+                        delta = times[i] - times[i-1]
+                        end_time = times[i] + delta
+                    else:
+                        # Single timestep - assume 1 day
+                        end_time = start_time + pd.Timedelta(days=1)
+                
+                start_sec = time_converter.to_seconds(start_time)
+                end_sec = time_converter.to_seconds(end_time)
+                start_dt = start_time
+                end_dt = end_time
+            else:
+                # For numeric data
+                start_sec = times[i] * 86400
+                if i + 1 < len(times):
+                    end_sec = times[i + 1] * 86400
+                else:
+                    # Last timestep - estimate duration
+                    if i > 0:
+                        delta = times[i] - times[i-1]
+                        end_sec = (times[i] + delta) * 86400
+                    else:
+                        # Single timestep - assume 1 day
+                        end_sec = (times[i] + 1) * 86400
+                start_dt = None
+                end_dt = None
+            
+            # Add the event for this timestep
+            scenario.add_event(
+                f"rain_event_{len(scenario.events)}",
+                start_sec / scenario._units[scenario.time_unit],
+                end_sec / scenario._units[scenario.time_unit],
+                intensity,
+                list(scenario.zones),
+                start_datetime=start_dt,
+                end_datetime=end_dt
+            )
 
 
 def chloride_scenario(road_x_min: float, road_x_max: float, applications: list, 

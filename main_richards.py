@@ -11,7 +11,7 @@ def main():
     config = SimulationConfig(
         name="Datetime_Duration",
         start_datetime=datetime(2024, 4, 15),
-        end_datetime=datetime(2024, 5, 30),
+        end_datetime=datetime(2024, 4, 30),
         dt_td=timedelta(hours=3)
     )
     
