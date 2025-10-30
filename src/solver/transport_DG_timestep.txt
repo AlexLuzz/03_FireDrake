@@ -1,0 +1,162 @@
+from firedrake import (
+    jump,     # Jump operator [[u]] = u⁺n⁺ + u⁻n⁻
+    avg,      # Average operator {u} = (u⁺ + u⁻)/2
+    dS,       # Interior face measure
+    ds,       # Boundary face measure
+    CellDiameter,  # h for penalty parameter
+    FacetNormal,   # Outward normal n
+    conditional,   # For upwinding: if-else in UFL
+)
+
+c('+')     # Value from "+" side
+c('-')     # Value from "-" side
+grad(c)('+')  # Gradient from "+" side
+n('+')     # Normal from "+" side (points from + to -)
+
+# OLD:
+V = FunctionSpace(mesh, "CG", 1)
+
+# NEW:
+V = FunctionSpace(mesh, "DG", 1)  # Or degree 2, 3 for higher accuracy
+
+n = FacetNormal(self.mesh)  # Normal vector
+h = CellDiameter(self.mesh)  # Element size for penalty
+h_avg = (h('+') + h('-')) / 2  # Average size at faces
+
+# Velocity at cell faces
+v_n = dot(self.velocity('+'), n('+'))
+
+# Upwind concentration
+c_upwind = conditional(v_n > 0, c('+'), c('-'))
+
+# Interior faces - upwind flux
+F_adv_interior = v_n * c_upwind * (q('+') - q('-')) * dS
+
+# Boundary faces - simple outflow
+# (assuming natural outflow, no inflow BC)
+v_n_boundary = dot(self.velocity, n)
+F_adv_boundary = v_n_boundary * c * q * ds
+
+# Total advection
+F_advection = F_adv_interior + F_adv_boundary
+
+# Penalty parameter
+degree = 1  # DG polynomial degree
+alpha = Constant(10.0)  # Tune this! (10-100 typical)
+sigma = alpha * (degree + 1)**2 / h_avg
+
+# --- Interior faces ---
+# (1) Volume term (same as before)
+F_diff_vol = dot(dot(D_eff, grad(c)), grad(q)) * dx
+
+# (2) Consistency: -{D∇c·n}·[[q]]
+F_diff_consistency = -dot(avg(dot(dot(D_eff, grad(c)), n('+'))), jump(q, n)) * dS
+
+# (3) Symmetry: -{D∇q·n}·[[c]]
+F_diff_symmetry = -dot(avg(dot(dot(D_eff, grad(q)), n('+'))), jump(c, n)) * dS
+
+# (4) Penalty: (σ/h)·[[c]]·[[q]]
+F_diff_penalty = sigma * dot(jump(c, n), jump(q, n)) * dS
+
+# --- Boundary faces (natural BC: no-flux) ---
+# For no-flux boundaries, we typically omit boundary face terms
+# If you have Dirichlet BC on boundaries, add similar terms with ds
+
+F_dispersion = (F_diff_vol + F_diff_consistency + 
+                F_diff_symmetry + F_diff_penalty)
+
+
+
+def solve_timestep(self, t: float):
+    """
+    Solve transport for one timestep using DG
+    """
+    # Step 1: Compute velocity field (unchanged)
+    pressure = self.pressure_solver.p_n
+    K = self.field_map.get_K_field(pressure)
+    vx, vy = self.compute_darcy_velocity(pressure, K)
+    
+    # Step 2: Get transport coefficients
+    D_0 = 2e-7
+    alpha_T = self.field_map.get_alpha_T_field()
+    alpha_L = self.field_map.get_alpha_L_field()
+    D_eff = self.assemble_dispersion_tensor(vx, vy, D_0, alpha_T, alpha_L)
+    
+    # Step 3: Source
+    source_expr = self.transport_source.get_flux_expression(t, self.mesh)
+    
+    # Step 4: DG formulation
+    c = TrialFunction(self.V)
+    q = TestFunction(self.V)
+    dt = Constant(self.config.dt)
+    
+    # Geometric quantities for DG
+    n = FacetNormal(self.mesh)
+    h = CellDiameter(self.mesh)
+    h_avg = (h('+') + h('-')) / 2
+    
+    # Penalty parameter (tune alpha between 10-100)
+    degree = self.V.ufl_element().degree()
+    alpha = Constant(50.0)  # Start with 50, adjust if unstable
+    sigma = alpha * (degree + 1)**2 / h_avg
+    
+    # ============================================
+    # WEAK FORM CONSTRUCTION
+    # ============================================
+    
+    # (1) Time derivative
+    F = (c - self.c_n) / dt * q * dx
+    
+    # (2) ADVECTION - Upwind DG
+    # Interior faces
+    v_n = dot(self.velocity('+'), n('+'))
+    c_upwind = conditional(v_n > 0, c('+'), c('-'))
+    F += v_n * c_upwind * (q('+') - q('-')) * dS
+    
+    # Boundary faces (outflow)
+    v_n_boundary = dot(self.velocity, n)
+    F += v_n_boundary * c * q * ds
+    
+    # (3) DISPERSION - Symmetric Interior Penalty (SIP)
+    # Volume term
+    F += dot(dot(D_eff, grad(c)), grad(q)) * dx
+    
+    # Interior face terms
+    F += -dot(avg(dot(dot(D_eff, grad(c)), n('+'))), jump(q, n)) * dS  # Consistency
+    F += -dot(avg(dot(dot(D_eff, grad(q)), n('+'))), jump(c, n)) * dS  # Symmetry
+    F += sigma * dot(jump(c, n), jump(q, n)) * dS                       # Penalty
+    
+    # Boundary faces - for no-flux BC, these terms vanish naturally
+    # (If you had Dirichlet BC, add similar terms with ds)
+    
+    # (4) Source/sink
+    F += -source_expr * q * dx
+    
+    # ============================================
+    # SOLVE
+    # ============================================
+    a = lhs(F)
+    L = rhs(F)
+    
+    solver_params = {
+        'ksp_type': 'preonly',
+        'pc_type': 'lu',
+        'pc_factor_mat_solver_type': 'mumps'
+    }
+    
+    # No boundary conditions needed for DG (handled through fluxes)
+    solve(a == L, self.c_new, bcs=[], solver_parameters=solver_params)
+    
+    # Enforce non-negative (DG can still produce small negatives)
+    c_data = self.c_new.dat.data
+    negative_nodes = c_data < 0
+    if negative_nodes.any():
+        num_negative = negative_nodes.sum()
+        min_val = c_data.min()
+        if self.debug:
+            print(f"  WARNING: {num_negative} nodes with negative concentration "
+                  f"(min={min_val:.3e}), clipping to 0")
+        c_data[negative_nodes] = 0.0
+    
+    # Update for next timestep
+    self.c_n.assign(self.c_new)
