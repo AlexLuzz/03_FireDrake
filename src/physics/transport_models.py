@@ -4,8 +4,6 @@ Minimal ABC pattern like hydraulic_models.py
 """
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-import numpy as np
-from firedrake import function
 # ==============================================
 # ABSTRACT BASE CLASS
 # ==============================================
@@ -53,7 +51,7 @@ class ContaminantProperties:
     @classmethod
     def chloride(cls, alpha_L: float = 0.01):
         """Cl⁻ - conservative tracer"""
-        return cls(name="Chloride", Dd=2.03e-7, Kd=0.0, alpha_L=alpha_L)
+        return cls(name="Chloride", Dd=2.03e-6, Kd=0.0, alpha_L=alpha_L)
     
     @classmethod
     def sodium(cls, alpha_L: float = 0.01):

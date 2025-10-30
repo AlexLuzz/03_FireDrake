@@ -1,5 +1,5 @@
 from typing import Dict, Callable
-
+import numpy as np
 
 class PlotFieldConfig:
     """Configuration for field metadata and spatial plotting"""
@@ -54,15 +54,6 @@ class PlotTimeSeriesConfig:
 def get_default_field_configs() -> Dict[str, PlotFieldConfig]:
     """Returns default configurations for common fields"""
     return {
-        'water_table': PlotFieldConfig(
-            field_name='water_table',
-            label='Water Table Elevation',
-            units='m',
-            colormap='Blues',
-            vmin=0,
-            vmax=1,
-            data_key='water_table'
-        ),
         'saturation': PlotFieldConfig(
             field_name='saturation',
             label='Saturation',
@@ -75,12 +66,13 @@ def get_default_field_configs() -> Dict[str, PlotFieldConfig]:
         'concentration': PlotFieldConfig(
             field_name='concentration',
             label='Concentration',
-            units='kg/m³',
-            colormap='YlOrRd',
+            units='mg/L',  # Changed from kg/m³ to mg/L
+            colormap='Spectral_r',  # Changed from YlOrRd to Spectral_r
             vmin=0,
             vmax=None,
             data_key='concentration',
-            use_log_scale=False
+            use_log_scale=False,
+            transform_func=lambda x: np.array(x) * 1e3  # Convert kg/m³ to mg/L (multiply by 1,000)
         ),
         'pressure': PlotFieldConfig(
             field_name='pressure',

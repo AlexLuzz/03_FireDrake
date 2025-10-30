@@ -33,14 +33,13 @@ MULTIPLE FIELDS:
     }
 """
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 import matplotlib.dates as mdates
 from matplotlib.gridspec import GridSpec
 import numpy as np
 import pandas as pd
 from scipy.interpolate import LinearNDInterpolator, interp1d
 from datetime import datetime
-from typing import Dict, List, Optional, Union, Tuple, Any, Callable
+from typing import Dict, List, Tuple
 from .plot_configs import (PlotFieldConfig, PlotTimeSeriesConfig, 
                            get_default_field_configs, get_default_timeseries_configs)
 
@@ -233,7 +232,7 @@ class ResultsPlotter:
     def _load_comsol_data(self, plotting_config, probe_data):
         """Load COMSOL comparison data"""
         try:
-            from tools.import_results import load_comsol_data, DEFAULT_COMSOL_REF_DATE
+            from ..tools.import_results import load_comsol_data, DEFAULT_COMSOL_REF_DATE
             start_from = 0.0
             if hasattr(self.config, 'start_datetime') and self.config.start_datetime:
                 comsol_ref_date = plotting_config.get('comsol_ref_date', DEFAULT_COMSOL_REF_DATE)
@@ -252,7 +251,7 @@ class ResultsPlotter:
     def _load_measured_data(self, plotting_config, probe_data):
         """Load measured comparison data"""
         try:
-            from tools.import_results import load_measured_data
+            from ..tools.import_results import load_measured_data
             ref_date = plotting_config.get('measured_ref_date')
             if ref_date is None and hasattr(self.config, 'start_datetime'):
                 ref_date = self.config.start_datetime
@@ -272,7 +271,6 @@ class ResultsPlotter:
                 offsets=plotting_config.get('measured_offsets'),
                 smooth_window=30,
                 hampel_window=120,
-                hampel_sigma=3.0
             )
         except Exception as e:
             print(f"⚠️  Could not load measured data: {e}")
@@ -484,7 +482,7 @@ class ResultsPlotter:
                 lines, labels = ax.get_legend_handles_labels()
                 lines2, labels2 = ax_rain.get_legend_handles_labels()
                 ax.legend(lines + lines2, labels + labels2,
-                         loc='center left', bbox_to_anchor=(1.15, 0.5), fontsize=10)
+                         loc='upper left', bbox_to_anchor=(0.02, 0.98), fontsize=10)
         
         # Set labels
         ylabel = f'{field_cfg.label} ({field_cfg.units})'
@@ -518,7 +516,7 @@ class ResultsPlotter:
             handles, labels = ax.get_legend_handles_labels()
             by_label = dict(zip(labels, handles))
             ax.legend(by_label.values(), by_label.keys(), 
-                     loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=10)
+                     loc='upper left', bbox_to_anchor=(0.02, 0.98), fontsize=10)
     
     def _plot_residuals(
         self, 
@@ -626,7 +624,7 @@ class ResultsPlotter:
             n_snapshots: Number of snapshots to plot
         """
         if field_names is None:
-            field_names = ['water_table']
+            field_names = ['saturation']
         
         sorted_times = sorted(snapshots.keys())[:n_snapshots]
         while len(sorted_times) < n_snapshots:

@@ -3,7 +3,6 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [ ] Improve plotters logic, it sucks
     - [ ] D0 problem OR just values too low and mass loss 
         (i.e. need for fancy darcy post-processing and DG ?)
 
@@ -23,6 +22,7 @@
 
 
 ## ✅ Completed
+- [x] Improve plotters logic, it sucks
 - [x] Major update of physics/field_maping interaction
 - [x] Correct Result plotter : as is can't not plot measured and comsol ...
 - [x] Update ProbeManager and snapshotManager to be more versatile to compute 

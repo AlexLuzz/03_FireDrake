@@ -10,8 +10,8 @@ def main():
     # ==========================================
     config = SimulationConfig(
         name="Datetime_Duration",
-        start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 15),
+        start_datetime=datetime(2024, 4, 15),
+        end_datetime=datetime(2024, 5, 30),
         dt_td=timedelta(hours=3)
     )
     
@@ -26,10 +26,15 @@ def main():
     rain_source = rainfall_scenario(
         from_date=config.start_datetime,
         to_date=config.end_datetime,
-        meteostat_station='SOK6B',
-        meteostat_agg_hours=6,
+        # From CSV file (need to specify path and rain unit)
+        csv_path=config.data_input_dir / "BB_METEO.csv",
+        rain_unit="mm/day",
+        # From Meteostat (uncomment to use)
+        #meteostat_station='SOK6B',
+        #meteostat_agg_hours=6,
         zones=rain_zones
     )
+
     
     # ==========================================
     # 3. GEOMETRY (Domain - pure geometry)
@@ -40,11 +45,11 @@ def main():
     # ==========================================
     # 4. MATERIALS (properties)
     # ==========================================
-    domain.assign("base", till()
-                  #till_curve_RAF()
+    domain.assign("base", #till()
+                  till_curve_RAF()
                   )
-    domain.assign("GI", terreau()
-                  #terreau_curve_RAF()
+    domain.assign("GI", #terreau()
+                  terreau_curve_RAF()
                   )
 
     # ==========================================
@@ -59,7 +64,7 @@ def main():
     bc_manager = BoundaryConditionManager(
         V,
         left_wt=1.2,
-        right_wt=1.8
+        right_wt=1.2
     )
     
     # ==========================================
@@ -110,10 +115,10 @@ def main():
     # Configure what to plot
     plotting_config = {
         'time_series_fields': ['water_table'],      # Water table elevation
-        'plot_comsol_comparison': False,            # Set to True to use default COMSOL file
-        'plot_measured_comparison': False,          # Set to True to use default measured file
+        'plot_comsol_comparison': True,            # Set to True to use default COMSOL file
+        'plot_measured_comparison': True,          # Set to True to use default measured file
         'plot_snapshots': True,                     # Snapshot plots if data available
-        'snapshot_fields': ['water_table'],         # Fields to show in snapshots
+        'snapshot_fields': ['saturation'],         # Fields to show in snapshots
         'snapshot_overlay': False                   # Single field snapshots
     }
     

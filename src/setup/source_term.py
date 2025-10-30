@@ -222,7 +222,7 @@ class SourceScenario:
 def rainfall_scenario(domain_length: float = None, events: list = None, time_unit: str = "days",
                      csv_path: str = None, time_col: str = "Date", rain_col: str = "Pluie tot. (mm)",
                      from_date: datetime = None, to_date: datetime = None, 
-                     rain_unit: str = None, zones: list = None,
+                     rain_unit: str = "mm/day", zones: list = None,
                      meteostat_station: str = None, meteostat_agg_hours: int = 6):
     """
     Create rainfall scenario from events, CSV, or Meteostat.
@@ -418,20 +418,23 @@ def _create_rain_events(scenario: SourceScenario, times, intensities, time_conve
             end_datetime=end_dt
         )
     
+    # Minimum rain intensity threshold (mm/hr) - ignore very light precipitation
+    min_intensity_threshold = 0.3  # Only create events for rain >= 0.3 mm/hr
+    
     for i, intensity in enumerate(intensities):
-        # Start new event
-        if intensity > 0 and not in_event:
+        # Start new event (only if above threshold)
+        if intensity >= min_intensity_threshold and not in_event:
             in_event = True
             event_start_idx = i
             current_intensity = intensity
         
-        # End event
-        elif intensity <= 0 and in_event:
+        # End event (when below threshold)
+        elif intensity < min_intensity_threshold and in_event:
             add_event(event_start_idx, i, current_intensity)
             in_event = False
         
-        # Intensity changed - close old event, start new
-        elif in_event and abs(intensity - current_intensity) > 1e-6:
+        # Intensity changed significantly - close old event, start new
+        elif in_event and abs(intensity - current_intensity) > 0.1:  # 0.1 mm/hr threshold for changes
             add_event(event_start_idx, i, current_intensity)
             event_start_idx = i
             current_intensity = intensity

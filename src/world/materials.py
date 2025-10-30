@@ -22,14 +22,14 @@ def till_curve_RAF(Ks=9e-6, porosity=0.4, transport=False):
     hydro_model = CurveBasedHydraulicModel.from_library("till")
     if transport:
         transport_model = chloride_transport()
-    return Material(hydraulic=hydro_model, Ks=Ks, porosity=porosity, transport=transport_model)
+    return Material(hydraulic=hydro_model, Ks=Ks, porosity=porosity, transport=transport_model if transport else None)
 
 def terreau_curve_RAF(Ks=4e-5, porosity=0.3, transport=False):
     """Terreau material"""
     hydro_model = CurveBasedHydraulicModel.from_library("terreau")
     if transport:
         transport_model = chloride_transport()
-    return Material(hydraulic=hydro_model, Ks=Ks, porosity=porosity, transport=transport_model)
+    return Material(hydraulic=hydro_model, Ks=Ks, porosity=porosity, transport=transport_model if transport else None)
 
 def till(Ks=9e-6, porosity=0.4):
     """Till material"""

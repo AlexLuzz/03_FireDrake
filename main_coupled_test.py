@@ -14,11 +14,12 @@ def main_transport():
     # ==========================================
     # 1. CONFIGURATION
     # ==========================================
+
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 10),
-        dt_td=timedelta(hours=3)  # Smaller timestep for smoother transport curves
+        end_datetime=datetime(2024, 5, 15),
+        dt_td=timedelta(hours=6)  # Smaller timestep for smoother transport curves
     )
     
     # ==========================================
@@ -43,7 +44,7 @@ def main_transport():
     # Create chloride application scenario on the GI zone
     chloride_source = SourceScenario(
         time_unit="hours", 
-        rate_unit_conversion=1.0  # kg/m²/s (SI units)
+        rate_unit_conversion=1.0/3600.0  # Convert kg/m²/hr to kg/m²/s
     )
     
     # Define chloride application zone (surface of GI)
@@ -51,7 +52,7 @@ def main_transport():
         "deicing_zone", 
         x_min=9.0, 
         x_max=11.0, 
-        y_min=4.9,  # Very top surface
+        y_min=4.8,  # Very top surface
         y_max=5.0,
         multiplier=1.0
     )
@@ -59,7 +60,7 @@ def main_transport():
     chloride_source.add_event(
         name="deicing_zone",
         start=config.t_end_hours*0.05,
-        end=config.t_end_hours*0.1,
+        end=config.t_end_hours*0.3,
         rate=0.1,
         zones="deicing_zone"
     )
@@ -195,6 +196,8 @@ def main_transport():
     )
     
     print(f"✓ Chloride visualization saved")
+    t_total = datetime.now() - t_launch
+    print(f"Total simulation time: {t_total}")
 
 if __name__ == "__main__":
     main_transport()
