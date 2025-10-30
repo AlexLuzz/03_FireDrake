@@ -56,7 +56,10 @@ from .tools import (
 # Visualization
 from .visualization import (
     ResultsPlotter,
-    GifAnimator
+    GifAnimator,
+    SimulationReport,
+    plot_material_curves,
+    plot_domain_geometry
 )
 
 # World
@@ -110,6 +113,9 @@ __all__ = [
     # Visualization
     'ResultsPlotter',
     'GifAnimator',
+    'SimulationReport',
+    'plot_material_curves',
+    'plot_domain_geometry',
 
     # World
     'Domain',
