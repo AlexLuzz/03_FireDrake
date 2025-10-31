@@ -9,10 +9,8 @@ Uses SourceScenario for chloride pulse definition and leverages existing plottin
 import numpy as np
 import sys
 import os
-
-from ufl import FunctionSpace
+from firedrake import FunctionSpace
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from src import *
 
 
@@ -128,7 +126,7 @@ def main():
     domain = Domain(nx, ny, Lx, Ly)
     domain.assign("base", till(transport=True))
 
-    
+
     # Configuration
     config = SimulationConfig(
         name="Transport_VLSPI_Conservative",
@@ -188,9 +186,8 @@ def main():
         'lambda': 0.0  # No decay
     }
     
-    
-
     V = FunctionSpace(domain.mesh, "CG", 1)
+
     field_map = MaterialField(domain, V)
     bc_manager = BoundaryConditionManager(
         V,
@@ -200,8 +197,8 @@ def main():
     transport_solver = TransportSolver(domain, V, field_map, bc_manager, chloride_scenario, config)
     
     # Set up monitoring
-    probe_positions = [(2.0, 1.0), (4.0, 1.0), (6.0, 1.0), (8.0, 1.0)]
-    probe_manager = ProbeManager(probe_positions)
+    probe_positions = [[2.0, 1.0], [4.0, 1.0], [6.0, 1.0], [8.0, 1.0]]
+    probe_manager = ProbeManager(domain.mesh, probe_positions)
     
     snapshot_times = [0, 1800, 3600, 7200]  # 0, 0.5h, 1h, 2h
     snapshot_manager = SnapshotManager(snapshot_times)
