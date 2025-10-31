@@ -109,7 +109,8 @@ def main():
         probe_manager=probe_manager, 
         rain_scenario=rain_source, 
         domain=domain,
-        snapshot_manager=snapshot_manager
+        snapshot_manager=snapshot_manager,
+        bc_manager=bc_manager
     )
     
     # Configure what to plot

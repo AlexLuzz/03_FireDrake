@@ -62,7 +62,8 @@ def main():
         probe_manager=probe_manager,
         rain_scenario=rain_source,
         domain=domain,
-        snapshot_manager=snapshot_manager
+        snapshot_manager=snapshot_manager,
+        bc_manager=bc_manager
     )
     
     plotting_config = {
@@ -74,17 +75,14 @@ def main():
         'snapshot_overlay': False
     }
     
-    plotter.plot_complete_results(
-        filename=config.output_dir / f'rain_simulation_{now}.png',
-        plotting_config=plotting_config
-    )
-    
     # ==========================================
     # NEW: ADD REPORT GENERATION (3 LINES!)
     # ==========================================
     report = SimulationReport(output_dir=config.output_dir)
-    report.print_richards_report(config, domain, field_map, plotter,
-                                 filename=config.output_dir / f'report_richards_{now}.pdf')
+    report.print_richards_report(config, domain, field_map, plotter, 
+                                boundary_conditions=bc_manager,
+                                plotting_config=plotting_config,
+                                filename=config.output_dir / f'report_richards_{now}.pdf')
     
 if __name__ == "__main__":
     main()

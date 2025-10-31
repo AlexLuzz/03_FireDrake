@@ -13,7 +13,11 @@
     - [ ] Hybrid display on results, plot water table / rain mm / salt flux (maybe just tweak the source_term plot)
     - [ ] Implement test script with ANALYTICAL solution for validation
 
-    ## Low Priority 💡
+    ## Side-side project that will never see the light
+    - [ ] Use pyTorch and code a optimization loop to auto-fit parameters ! (probably doable for richard's)
+    - [ ] TRY some uncertainty evaluation with bayesian simulation using PYRO ????
+
+    ## ULTRA Low Priority 💡
     - [ ] Code cleanup
     - [ ] Documentation
 

@@ -54,6 +54,15 @@ class PlotTimeSeriesConfig:
 def get_default_field_configs() -> Dict[str, PlotFieldConfig]:
     """Returns default configurations for common fields"""
     return {
+        'water_table': PlotFieldConfig(
+            field_name='water_table',
+            label='Water Table Elevation',
+            units='m',
+            colormap='Blues',
+            vmin=None,
+            vmax=None,
+            data_key='water_table'
+        ),
         'saturation': PlotFieldConfig(
             field_name='saturation',
             label='Saturation',

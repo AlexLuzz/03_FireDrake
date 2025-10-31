@@ -3,7 +3,7 @@ from firedrake import (
     as_vector, grad, dot
 )
 
-from ..tools.tools import loading_bar, fancy_loading_bar
+from ..tools.tools import loading_bar
 
 class RichardsSolver:
     def __init__(self, domain, V, field_map, source_scenario, bc_manager, config):

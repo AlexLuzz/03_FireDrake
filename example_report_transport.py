@@ -15,7 +15,7 @@ def main_transport():
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 6, 30),
+        end_datetime=datetime(2024, 5, 15),
         dt_td=timedelta(hours=6)
     )
     
@@ -48,7 +48,7 @@ def main_transport():
     
     transport = TransportSolver(domain=domain, V=V, field_map=field_map,
                                pressure_solver=richards, bc_manager=None,
-                               transport_source=chloride_source, config=config, debug=False)
+                               transport_source=chloride_source, config=config)
     
     chloride_probe_positions = [[10.0, 4.8], [10.0, 3.0], [10.0, 1.5], [7.0, 1.5]]
     chloride_probe_names = ["LTC 1", "LTC 2", "LTC 3", "LTC 4"]
@@ -65,7 +65,7 @@ def main_transport():
     now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     plotter = ResultsPlotter(config, domain.mesh, probe_manager=probe_manager,
-                            rain_scenario=rain_source, domain=domain,
+                            rain_scenario=rain_source, domain=domain, bc_manager=bc_manager,
                             snapshot_manager=snapshot_manager)
     
     plotting_config = {

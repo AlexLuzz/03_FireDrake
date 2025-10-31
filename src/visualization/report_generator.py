@@ -29,7 +29,8 @@ class SimulationReport:
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def print_richards_report(self, config, domain, field_map, plotter,
-                            filename=None, include_snapshots=True):
+                            boundary_conditions=None, filename=None, include_snapshots=True,
+                            plotting_config: dict = None):
         """
         Generate Richards equation simulation report (3 pages)
         
@@ -47,6 +48,8 @@ class SimulationReport:
             Material field mapper
         plotter : ResultsPlotter
             Results plotter with probe and snapshot data
+        boundary_conditions : BoundaryConditionManager, optional
+            Boundary conditions for water table display
         filename : str or Path, optional
             Output PDF filename
         include_snapshots : bool
@@ -60,18 +63,18 @@ class SimulationReport:
         
         with PdfPages(filename) as pdf:
             # PAGE 1: Configuration + Model Setup
-            self._create_richards_setup_page(config, domain, field_map)
+            self._create_richards_setup_page(config, domain, field_map, boundary_conditions)
             pdf.savefig(bbox_inches='tight')
             plt.close()
             
             # PAGE 2: Time Series Results
-            self._create_timeseries_page(plotter, field_type='water_table')
+            self._create_timeseries_page(plotter, field_type='water_table', plotting_config=plotting_config)
             pdf.savefig(bbox_inches='tight')
             plt.close()
             
             # PAGE 3: Spatial Snapshots (if requested and available)
             if include_snapshots and plotter.snapshot_manager:
-                self._create_snapshots_page(plotter, field_type='saturation')
+                self._create_snapshots_page(plotter, field_type='saturation', plotting_config=plotting_config)
                 pdf.savefig(bbox_inches='tight')
                 plt.close()
             
@@ -159,11 +162,11 @@ class SimulationReport:
         print(f"✓ Report saved: {filename}")
         return filename
     
-    def _create_richards_setup_page(self, config, domain, field_map):
+    def _create_richards_setup_page(self, config, domain, field_map, boundary_conditions=None):
         """Create page 1 for Richards report: Config + Soil + Geometry"""
         fig = plt.figure(figsize=(11, 14))
-        gs = gridspec.GridSpec(4, 3, height_ratios=[1, 1.2, 0.1, 1], 
-                              width_ratios=[1, 1, 1], hspace=0.35, wspace=0.3)
+        gs = gridspec.GridSpec(4, 4, height_ratios=[1, 1.2, 0.1, 1], 
+                              width_ratios=[1, 1, 1, 1], hspace=0.35, wspace=0.25)
         
         # Section 1: Configuration Parameters (spans all columns)
         ax1 = fig.add_subplot(gs[0, :])
@@ -186,7 +189,7 @@ Mesh Resolution: {domain.nx} × {domain.ny} elements
                 fontsize=11, verticalalignment='top', fontfamily='monospace',
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
         
-        # Section 2: Material Curves (3 columns)
+        # Section 2: Material Curves (4 columns)
         # Get materials from domain
         materials = {}
         if hasattr(domain, 'materials'):
@@ -197,39 +200,50 @@ Mesh Resolution: {domain.nx} × {domain.ny} elements
             # Create the curves plot and extract data
             temp_fig = plot_material_curves(materials)
             
-            # Create 3 subplots in row 1 (material curves)
-            curve_axes = [fig.add_subplot(gs[1, i]) for i in range(3)]
+            # Create 4 subplots in row 1 (material curves + parameters)
+            curve_axes = [fig.add_subplot(gs[1, i]) for i in range(4)]
             
-            # Copy the curves to the main figure
+            # Copy the curves to the main figure (now includes 4th subplot for parameters)
             for i, (ax_src, ax_dst) in enumerate(zip(temp_fig.axes, curve_axes)):
-                # Copy plot content
-                for line in ax_src.get_lines():
-                    ax_dst.plot(line.get_xdata(), line.get_ydata(),
-                              label=line.get_label(), linewidth=2)
-                ax_dst.set_xlabel(ax_src.get_xlabel(), fontweight='bold', fontsize=9)
-                ax_dst.set_ylabel(ax_src.get_ylabel(), fontweight='bold', fontsize=9)
-                ax_dst.set_title(ax_src.get_title(), fontweight='bold', fontsize=10)
-                ax_dst.grid(True, alpha=0.3)
-                ax_dst.legend(fontsize=8)
-                ax_dst.tick_params(labelsize=8)
-                if hasattr(ax_src, 'get_xlim'):
-                    ax_dst.set_xlim(ax_src.get_xlim())
-                if hasattr(ax_src, 'get_ylim'):
-                    ax_dst.set_ylim(ax_src.get_ylim())
+                if i < 3:  # First 3 are curves
+                    # Copy plot content
+                    for line in ax_src.get_lines():
+                        ax_dst.plot(line.get_xdata(), line.get_ydata(),
+                                  label=line.get_label(), linewidth=2)
+                    ax_dst.set_xlabel(ax_src.get_xlabel(), fontweight='bold', fontsize=9)
+                    ax_dst.set_ylabel(ax_src.get_ylabel(), fontweight='bold', fontsize=9)
+                    ax_dst.set_title(ax_src.get_title(), fontweight='bold', fontsize=10)
+                    ax_dst.grid(True, alpha=0.3)
+                    ax_dst.legend(fontsize=8)
+                    ax_dst.tick_params(labelsize=8)
+                    if hasattr(ax_src, 'get_xlim'):
+                        ax_dst.set_xlim(ax_src.get_xlim())
+                    if hasattr(ax_src, 'get_ylim'):
+                        ax_dst.set_ylim(ax_src.get_ylim())
+                else:  # 4th subplot is parameters text
+                    ax_dst.axis('off')
+                    ax_dst.set_title(ax_src.get_title(), fontweight='bold', fontsize=10)
+                    # Copy text elements
+                    for text in ax_src.texts:
+                        bbox_props = None
+                        if text.get_bbox_patch():
+                            bbox = text.get_bbox_patch()
+                            bbox_props = dict(boxstyle=bbox.get_boxstyle(), 
+                                             facecolor=bbox.get_facecolor(),
+                                             edgecolor=bbox.get_edgecolor(),
+                                             linewidth=bbox.get_linewidth(),
+                                             alpha=bbox.get_alpha())
+                        
+                        ax_dst.text(text.get_position()[0], text.get_position()[1],
+                                text.get_text(), ha=text.get_ha(), va=text.get_va(),
+                                fontsize=text.get_fontsize()*0.8, fontfamily=text.get_fontfamily(),
+                                bbox=bbox_props, transform=ax_dst.transAxes)
             
             plt.close(temp_fig)
         
         # Section 3: Domain Geometry (spans all columns, bottom section)
-        # Get water table level if available
-        water_table = getattr(config, 'water_table_level', None)
-        if water_table is None and hasattr(field_map, 'bc_manager'):
-            # Try to get from boundary conditions
-            bc = field_map.bc_manager
-            if hasattr(bc, 'left_wt'):
-                water_table = bc.left_wt
-        
         # Plot domain geometry in a temporary figure and extract info
-        temp_domain_fig = plot_domain_geometry(domain, water_table_level=water_table)
+        temp_domain_fig = plot_domain_geometry(domain, boundary_conditions=boundary_conditions)
         
         # Create domain subplot and recreate content
         ax3 = fig.add_subplot(gs[3, :])
@@ -359,8 +373,10 @@ Domain: {domain.Lx} m × {domain.Ly} m | Mesh: {domain.nx} × {domain.ny}
             plt.close(temp_fig)
         
         # Section 4: Domain Geometry (spans all columns)
+        boundary_conditions = getattr(field_map, 'bc_manager', None)
         water_table = getattr(config, 'water_table_level', None)
-        temp_domain_fig = plot_domain_geometry(domain, water_table_level=water_table)
+        temp_domain_fig = plot_domain_geometry(domain, boundary_conditions=boundary_conditions,
+                                             water_table_level=water_table)
         
         ax4 = fig.add_subplot(gs[4, :])
         temp_ax = temp_domain_fig.axes[0]
@@ -425,46 +441,76 @@ Domain: {domain.Lx} m × {domain.Ly} m | Mesh: {domain.nx} × {domain.ny}
         
         return fig
     
-    def _create_timeseries_page(self, plotter, field_type='water_table'):
-        """Create time series results page"""
-        # This will use the existing plotter functionality
-        # Just call plotter's internal time series method
-        fig = plt.figure(figsize=(11, 8.5))
-        
+    def _create_timeseries_page(self, plotter, field_type='water_table', plotting_config: dict = None):
+        """Create time series results page using ResultsPlotter"""
+        if plotting_config is None:
+            plotting_config = {
+                'time_series_fields': [field_type],
+                'plot_snapshots': False,  # Only time series for this page
+                'plot_comsol_comparison': False,
+                'plot_measured_comparison': False
+            }
+        else:
+            # Ensure we only plot time series and the correct field
+            plotting_config = plotting_config.copy()
+            plotting_config['time_series_fields'] = [field_type]
+            plotting_config['plot_snapshots'] = False
+
+        # Use plot_complete_results to generate the figure
+        fig = plotter.plot_complete_results(
+            plotting_config=plotting_config,
+            return_figure=True
+        )
+
         if field_type == 'water_table':
             title = 'WATER TABLE ELEVATION - TIME SERIES'
         elif field_type == 'concentration':
             title = 'CONTAMINANT CONCENTRATION - TIME SERIES'
         else:
             title = f'{field_type.upper()} - TIME SERIES'
-        
-        fig.suptitle(title, fontsize=16, fontweight='bold')
-        
-        # Use plotter's existing time series plotting
-        # This is a placeholder - actual implementation would call plotter methods
-        ax = fig.add_subplot(111)
-        ax.text(0.5, 0.5, f'Time series plot for {field_type}\n(Use existing plotter functionality)',
-               ha='center', va='center', fontsize=12)
-        
+
+        fig.suptitle(title, fontsize=16, fontweight='bold', y=0.98)
         return fig
     
-    def _create_snapshots_page(self, plotter, field_type='saturation'):
-        """Create spatial snapshots page"""
-        fig = plt.figure(figsize=(11, 8.5))
-        
+    def _create_snapshots_page(self, plotter, field_type='saturation', plotting_config: dict = None):
+        """Create spatial snapshots page using ResultsPlotter"""
+        if plotting_config is None:
+            plotting_config = {
+                'time_series_fields': [],  # No time series for this page
+                'plot_snapshots': True,
+                'snapshot_fields': [field_type],
+                'plot_comsol_comparison': False,
+                'plot_measured_comparison': False
+            }
+        else:
+            # Ensure we only plot snapshots and the correct field
+            plotting_config = plotting_config.copy()
+            plotting_config['time_series_fields'] = []
+            plotting_config['plot_snapshots'] = True
+            plotting_config['snapshot_fields'] = plotting_config.get('snapshot_fields', [field_type])
+
+        # Use plot_complete_results to generate the figure
+        fig = plotter.plot_complete_results(
+            plotting_config=plotting_config,
+            return_figure=True
+        )
+
+        if fig is None:
+            # No snapshots available, create a placeholder
+            fig = plt.figure(figsize=(11, 8.5))
+            ax = fig.add_subplot(111)
+            ax.text(0.5, 0.5, 'No snapshots available\n(snapshot_manager not provided or empty)',
+                   ha='center', va='center', fontsize=14, fontweight='bold')
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis('off')
+
         if field_type == 'saturation':
             title = 'SOIL SATURATION - SPATIAL DISTRIBUTION'
         elif field_type == 'concentration':
             title = 'CONTAMINANT CONCENTRATION - SPATIAL DISTRIBUTION'
         else:
             title = f'{field_type.upper()} - SPATIAL DISTRIBUTION'
-        
-        fig.suptitle(title, fontsize=16, fontweight='bold')
-        
-        # Use plotter's existing snapshot plotting
-        # This is a placeholder
-        ax = fig.add_subplot(111)
-        ax.text(0.5, 0.5, f'Snapshot plots for {field_type}\n(Use existing plotter functionality)',
-               ha='center', va='center', fontsize=12)
-        
+
+        fig.suptitle(title, fontsize=16, fontweight='bold', y=0.98)
         return fig
