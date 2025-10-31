@@ -227,20 +227,15 @@ def plot_domain_geometry(domain, boundary_conditions=None, water_table_level=Non
                    bbox=dict(boxstyle='round,pad=0.5', facecolor='darkgreen',
                             edgecolor='white', linewidth=2, alpha=0.9))
     
-    # Get water table level from boundary conditions if provided
-    if boundary_conditions is not None and water_table_level is None:
-        left_wt, right_wt = boundary_conditions.get_water_table(0.0)  # At t=0
-        if abs(left_wt - right_wt) < 0.01:  # Essentially constant
-            water_table_level = left_wt
-        else:
-            # Draw gradient water table line
-            x_vals = np.linspace(0, Lx, 100)
-            wt_vals = np.linspace(left_wt, right_wt, 100)
-            ax.plot(x_vals, wt_vals, color='blue', linestyle='--',
-                   linewidth=3, label=f'Water Table ({left_wt:.1f}m - {right_wt:.1f}m)', alpha=0.8)
+    # Plot water table from boundary conditions
+    if boundary_conditions is not None:
+        # Import here to avoid circular imports
+        from .result_plotter import ResultsPlotter
+        plotter = ResultsPlotter(domain=domain)
+        plotter.plot_water_table(ax, t=0.0, bc_manager=boundary_conditions, domain=domain)
     
-    # Draw constant water table if provided
-    if water_table_level is not None:
+    # Draw constant water table if provided and no BC manager
+    elif water_table_level is not None:
         ax.axhline(y=water_table_level, color='blue', linestyle='--',
                   linewidth=3, label=f'Water Table ({water_table_level:.1f}m)', alpha=0.8)
 

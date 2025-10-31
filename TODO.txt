@@ -3,13 +3,15 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
+    - [x-ish] Improve from_library logic, overal material params, maybe centralize the library - MAKE IT READABLE
     - [ ] D0 problem OR just values too low and mass loss 
         (i.e. need for fancy darcy post-processing and DG ?)
-    - [ ] Save pdf instead of png, with all parameters
+    - [x-ish] Save pdf instead of png, with all parameters
+    - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
+    - [ ] Process time tracking to evaluate the ratio 
     
     ## Medium Priority ⚡
     - [ ] Improve functionSpace and boundary conditions declaration logic
-    - [x-ish] Improve from_library logic, overal material params, maybe centralize the library
     - [ ] Hybrid display on results, plot water table / rain mm / salt flux (maybe just tweak the source_term plot)
     - [ ] Implement test script with ANALYTICAL solution for validation
 

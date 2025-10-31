@@ -433,62 +433,44 @@ class ResultsPlotter:
         # Add rain
         if self.rain_scenario:
             add_rain_bars(ax, self.rain_scenario.events, use_datetime)
-
-        # Plot boundary-condition water table for each probe (shows slope)
-        try:
-            if self.bc_manager and self.domain and self.probe_manager:
-                # Get simulation time range for BC plotting
-                t_start = times_sim[0] 
-                t_end = times_sim[-1]
-                t_mid = (t_start + t_end) / 2.0
-                bc_times = [t_start, t_mid, t_end]
-                bc_labels = ['BC t=0', 'BC t=mid', 'BC t=end']
-                bc_alphas = [0.9, 0.7, 0.5]
-                
-                # Determine colors used for the simulation series
-                sim_keys = [k for k in sim_data.keys() if k != 'times']
-                n_sim = len(sim_keys)
-                sim_colors = [base_colors[i % len(base_colors)] for i in range(n_sim)]
-
-                for bc_idx, (bc_time, bc_label, bc_alpha) in enumerate(zip(bc_times, bc_labels, bc_alphas)):
-                    left_wt, right_wt = self.bc_manager.get_water_table(bc_time)
-                    
-                    for idx, pname in enumerate(sim_keys):
-                        # probe positions assumed aligned with sim_data order
-                        if hasattr(self.probe_manager, 'probe_positions') and len(self.probe_manager.probe_positions) > idx:
-                            x_pos = self.probe_manager.probe_positions[idx][0]
-                            wt_probe = left_wt + (right_wt - left_wt) * (x_pos / float(self.domain.Lx))
-                            
-                            # Convert time to plot coordinates
-                            if use_datetime:
-                                bc_time_plot = self.config.time_converter.to_datetime(bc_time)
-                            else:
-                                bc_time_plot = bc_time / 3600.0
-                            
-                            # Plot vertical line at this time showing BC water table
-                            ax.axvline(bc_time_plot, color=sim_colors[idx], linestyle=':', linewidth=1.5,
-                                      alpha=bc_alpha, label=(bc_label if idx == 0 else None))
-                            
-                            # Plot horizontal line at this elevation for short duration around this time
-                            time_window = (times_plot[-1] - times_plot[0]) * 0.02  # 2% of total time
-                            if use_datetime:
-                                import pandas as pd
-                                t_start_win = bc_time_plot - pd.Timedelta(seconds=time_window*3600 if not use_datetime else time_window)
-                                t_end_win = bc_time_plot + pd.Timedelta(seconds=time_window*3600 if not use_datetime else time_window)
-                            else:
-                                t_start_win = bc_time_plot - time_window
-                                t_end_win = bc_time_plot + time_window
-                            
-                            ax.hlines(wt_probe, t_start_win, t_end_win, colors=sim_colors[idx], 
-                                     linestyles='-', linewidth=2.5, alpha=bc_alpha)
-        except Exception as e:
-            # Non-fatal: if BC plotting fails, continue without BC lines
-            print(f"Warning: BC plotting failed: {e}")
-            pass
-
+        
         # Set tight x-axis limits to data range
         if len(times_plot) > 0:
             ax.set_xlim(times_plot[0], times_plot[-1])
+    
+    def plot_water_table(self, ax, t, bc_manager, domain=None, use_datetime=False):
+        """
+        Plot water table line(s) from boundary conditions on spatial plots
+        
+        Args:
+            ax: matplotlib axis
+            t: time value for BC evaluation
+            bc_manager: boundary condition manager
+            domain: domain object (uses self.domain if not provided)
+            use_datetime: whether time is in datetime format
+        """
+        if not bc_manager:
+            return
+            
+        domain = domain or self.domain
+        if not domain:
+            return
+            
+        try:
+            left_wt, right_wt = bc_manager.get_water_table(t)
+            
+            if abs(left_wt - right_wt) < 0.01:  # Essentially constant
+                ax.axhline(y=left_wt, color='blue', linestyle='--',
+                          linewidth=2, label=f'Water Table ({left_wt:.1f}m)', alpha=0.8)
+            else:
+                # Draw gradient water table line
+                x_vals = np.linspace(0, domain.Lx, 100)
+                wt_vals = np.linspace(left_wt, right_wt, 100)
+                ax.plot(x_vals, wt_vals, color='blue', linestyle='--',
+                       linewidth=2, label=f'Water Table ({left_wt:.1f}m - {right_wt:.1f}m)', alpha=0.8)
+        except Exception as e:
+            print(f"Warning: Could not plot water table: {e}")
+            pass
     
     def _plot_residuals_panel(self, ax, probe_data, ref_data, field_name, ref_name, use_datetime):
         """Plot residuals panel"""

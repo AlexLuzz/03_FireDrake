@@ -45,11 +45,11 @@ def main():
     # ==========================================
     # 4. MATERIALS (properties)
     # ==========================================
-    domain.assign("base", #till()
-                  till_curve_RAF()
+    domain.assign("base", till()
+                  #till_curve_RAF()
                   )
-    domain.assign("GI", #terreau()
-                  terreau_curve_RAF()
+    domain.assign("GI", terreau()
+                  #terreau_curve_RAF()
                   )
 
     # ==========================================

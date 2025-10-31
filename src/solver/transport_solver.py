@@ -10,8 +10,8 @@ import numpy as np
 from ..tools.tools import loading_bar
 
 class TransportSolver:
-    def __init__(self, domain, V, field_map, pressure_solver, 
-                 bc_manager, transport_source, config):
+    def __init__(self, domain, V, field_map, 
+                 bc_manager, transport_source, config, pressure_solver=None):
         """
         Parameters:
         -----------
@@ -21,14 +21,15 @@ class TransportSolver:
             Function space for concentration
         field_map : MaterialField
             Field mapper (must have transport models)
-        pressure_solver : RichardsSolver
-            Richards solver (provides pressure field)
         bc_manager : BCManager
             Boundary condition manager
         transport_source : TransportSource
             Source/sink terms for contaminant
         config : Config
             Simulation configuration
+        pressure_solver : RichardsSolver
+            Richards solver (provides pressure field)
+            not needed if using prescribed velocity/dispersion (i.e. analytical comparison)
         """
         if not field_map.has_transport():
             raise ValueError("MaterialField must have transport models assigned")
@@ -38,7 +39,7 @@ class TransportSolver:
         self.V_vec = VectorFunctionSpace(self.mesh, "CG", 1)  # For velocity
 
         self.field_map = field_map
-        self.pressure_solver = pressure_solver
+        self.pressure_solver = pressure_solver if pressure_solver else None
         self.bc_manager = bc_manager
         self.transport_source = transport_source
         
@@ -107,13 +108,16 @@ class TransportSolver:
                                    [0, D_yy]])
         return D_tensor
     
-    def compute_mass_balance(self):
+    def compute_mass_balance(self, theta=None):
         """
         Compute total mass in the system for mass balance checking
         M = ∫ θ c dV
         """
-        pressure = self.pressure_solver.p_n
-        theta = self.field_map.get_theta_field(pressure)
+        if theta is None:
+            pressure = self.pressure_solver.p_n
+            theta = self.field_map.get_theta_field(pressure)
+        else:
+            theta = Constant(theta)
         total_mass = assemble(theta * self.c_new * self.dx)
         return total_mass
     
@@ -137,6 +141,7 @@ class TransportSolver:
         Args:
             t: Current time
             params: Dict with:
+                'porosity': float - Porosity [-] (optional, default=1.0)
                 'vx': float - x-velocity [m/s]
                 'vy': float - y-velocity [m/s]
                 'Dxx': float - Dispersion tensor xx component [m²/s]
@@ -237,15 +242,15 @@ class TransportSolver:
         
         for step in range(self.config.num_steps):
             t += self.config.dt
-            
-            # Solve flow
-            self.pressure_solver.solve_timestep(t)
-            m_n = self.compute_mass_balance()
-            
+                        
             # Solve transport
             if params:
+                m_n = self.compute_mass_balance(theta=params.get('porosity', 1.0)) # saturated conditions theta=porosity
                 self.solve_timestep_params(t, params)
             else:
+                m_n = self.compute_mass_balance()
+                # Solve flow
+                self.pressure_solver.solve_timestep(t)
                 self.solve_timestep(t)
             
             m_new = self.compute_mass_balance()

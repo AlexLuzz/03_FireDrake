@@ -509,8 +509,199 @@ Domain: {domain.Lx} m × {domain.Ly} m | Mesh: {domain.nx} × {domain.ny}
             title = 'SOIL SATURATION - SPATIAL DISTRIBUTION'
         elif field_type == 'concentration':
             title = 'CONTAMINANT CONCENTRATION - SPATIAL DISTRIBUTION'
-        else:
-            title = f'{field_type.upper()} - SPATIAL DISTRIBUTION'
-
         fig.suptitle(title, fontsize=16, fontweight='bold', y=0.98)
+        return fig
+
+    def print_transport_verification_report(self, config, domain, plotter, 
+                                          report_config, filename=None):
+        """
+        Generate transport verification report with custom pages
+        
+        Parameters:
+        -----------
+        config : SimulationConfig
+            Simulation configuration
+        domain : Domain  
+            Domain object
+        plotter : ResultsPlotter
+            Results plotter with simulation data
+        report_config : dict
+            Configuration with custom page definitions
+        filename : str, optional
+            Output filename
+        """
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"transport_verification_report_{timestamp}.pdf"
+        
+        filepath = self.output_dir / filename
+        
+        print(f"\nGenerating transport verification report...")
+        print(f"Output: {filepath}")
+        
+        with PdfPages(str(filepath)) as pdf:
+            # Page 1: Parameters (if requested)
+            if report_config.get('parameters', False):
+                print("  - Parameters page")
+                fig = self._create_parameters_page(config, domain)
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+            
+            # Page 2: Model setup (if requested) 
+            if report_config.get('model_setup', False):
+                print("  - Model setup page")
+                fig = self._create_model_setup_page(domain)
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+            
+            # Page 3: Standard timeseries (if requested)
+            if report_config.get('time_series_plots', False):
+                print("  - Standard timeseries page")
+                fig = self._create_timeseries_page(plotter, 'concentration')
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+            
+            # Page 4: Standard snapshots (if requested)
+            if report_config.get('snapshot_plots', False):
+                print("  - Standard snapshots page")
+                fig = self._create_snapshots_page(plotter, 'concentration')
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+            
+            # Custom pages
+            for key, page_config in report_config.items():
+                if not key.startswith('custom_page_'):
+                    continue
+                    
+                page_name = key.replace('custom_page_', '').replace('_', ' ').title()
+                print(f"  - Custom page: {page_name}")
+                
+                if page_config['type'] == 'timeseries_comparison':
+                    fig = self._create_comparison_timeseries_page(page_config)
+                elif page_config['type'] == 'timeseries':
+                    fig = self._create_custom_timeseries_page(page_config)
+                elif page_config['type'] == 'snapshots':
+                    fig = self._create_custom_snapshots_page(page_config)
+                else:
+                    print(f"    Warning: Unknown page type '{page_config['type']}'")
+                    continue
+                
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+        
+        print(f"Report generated: {filepath}")
+        return filepath
+
+    def _create_comparison_timeseries_page(self, page_config):
+        """Create comparison timeseries page (simulated vs analytical)"""
+        fig, ax = plt.subplots(figsize=(11, 8.5))
+        
+        sim_data = page_config['sim_data']
+        analytical_data = page_config['analytical_data']
+        
+        # Convert times to hours
+        times_hours = np.array(sim_data['times']) / 3600.0
+        probe_names = [k for k in sim_data.keys() if k != 'times']
+        colors = plt.rcParams.get('axes.prop_cycle').by_key()['color']
+        
+        for i, probe_name in enumerate(probe_names):
+            color = colors[i % len(colors)]
+            
+            # Simulated
+            ax.plot(times_hours, sim_data[probe_name], 
+                   color=color, linestyle='-', linewidth=2.5, 
+                   label=f'{probe_name} (Simulated)', alpha=0.8)
+            
+            # Analytical
+            ax.plot(times_hours, analytical_data[probe_name], 
+                   color=color, linestyle='--', linewidth=2, 
+                   label=f'{probe_name} (Analytical)', alpha=0.8)
+        
+        ax.set_xlabel('Time (hours)', fontweight='bold', fontsize=12)
+        ax.set_ylabel(page_config.get('ylabel', 'Value'), fontweight='bold', fontsize=12)
+        ax.set_title(page_config['title'], fontweight='bold', fontsize=14)
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.grid(True, alpha=0.3)
+        
+        if len(times_hours) > 0:
+            ax.set_xlim(times_hours[0], times_hours[-1])
+        
+        plt.tight_layout()
+        return fig
+
+    def _create_custom_timeseries_page(self, page_config):
+        """Create custom timeseries page"""
+        fig, ax = plt.subplots(figsize=(11, 8.5))
+        
+        data = page_config['data']
+        times_hours = np.array(data['times']) / 3600.0
+        probe_names = [k for k in data.keys() if k != 'times']
+        colors = plt.rcParams.get('axes.prop_cycle').by_key()['color']
+        
+        for i, probe_name in enumerate(probe_names):
+            color = colors[i % len(colors)]
+            ax.plot(times_hours, data[probe_name], 
+                   color=color, linestyle='-', linewidth=2, 
+                   label=probe_name, alpha=0.8)
+        
+        ax.set_xlabel('Time (hours)', fontweight='bold', fontsize=12)
+        ax.set_ylabel(page_config.get('ylabel', 'Value'), fontweight='bold', fontsize=12)
+        ax.set_title(page_config['title'], fontweight='bold', fontsize=14)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        if len(times_hours) > 0:
+            ax.set_xlim(times_hours[0], times_hours[-1])
+        
+        plt.tight_layout()
+        return fig
+
+    def _create_custom_snapshots_page(self, page_config):
+        """Create custom snapshots page"""
+        snapshots = page_config['data']
+        snapshot_times = list(snapshots.keys())
+        n_snapshots = len(snapshot_times)
+        
+        if n_snapshots == 0:
+            fig, ax = plt.subplots(figsize=(11, 8.5))
+            ax.text(0.5, 0.5, 'No snapshots available', ha='center', va='center',
+                   fontsize=14, fontweight='bold')
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis('off')
+            ax.set_title(page_config['title'], fontweight='bold', fontsize=16)
+            return fig
+        
+        # Arrange subplots
+        cols = min(3, n_snapshots)
+        rows = (n_snapshots + cols - 1) // cols
+        
+        fig, axes = plt.subplots(rows, cols, figsize=(11, 8.5))
+        if n_snapshots == 1:
+            axes = [axes]
+        elif rows == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten()
+        
+        from firedrake import plot
+        
+        for i, t in enumerate(snapshot_times):
+            if i < len(axes):
+                try:
+                    plot(snapshots[t], axes=axes[i])
+                    axes[i].set_title(f't = {t/3600:.1f}h', fontweight='bold')
+                    axes[i].set_aspect('equal')
+                except Exception as e:
+                    axes[i].text(0.5, 0.5, f'Plot error:\n{str(e)}', 
+                               ha='center', va='center', fontsize=10)
+                    axes[i].set_xlim(0, 1)
+                    axes[i].set_ylim(0, 1)
+        
+        # Hide unused subplots
+        for i in range(n_snapshots, len(axes)):
+            axes[i].axis('off')
+        
+        fig.suptitle(page_config['title'], fontsize=16, fontweight='bold', y=0.98)
+        plt.tight_layout()
         return fig
