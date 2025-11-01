@@ -66,6 +66,7 @@ from .visualization import (
 from .world import (
     Domain,
     MaterialField,
+    Material,
     till,
     terreau,
     till_curve_RAF,
@@ -120,6 +121,7 @@ __all__ = [
     # World
     'Domain',
     'MaterialField',
+    'Material',
     'till',
     'terreau',
     'till_curve_RAF',

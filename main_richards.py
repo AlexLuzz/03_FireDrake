@@ -10,9 +10,9 @@ def main():
     # ==========================================
     config = SimulationConfig(
         name="Datetime_Duration",
-        start_datetime=datetime(2024, 4, 15),
+        start_datetime=datetime(2024, 4, 1),
         end_datetime=datetime(2024, 4, 30),
-        dt_td=timedelta(hours=3)
+        dt_td=timedelta(hours=12)
     )
     
     # ==========================================
@@ -45,11 +45,17 @@ def main():
     # ==========================================
     # 4. MATERIALS (properties)
     # ==========================================
-    domain.assign("base", till()
+
+    soil_params = SoilParameters.till(Ks=4.5e-5)
+    hydro_model = CurveBasedHydraulicModel(theta_curve=HydraulicCurves.till_theta(),
+                                           kr_curve=HydraulicCurves.till_kr())
+    
+    domain.assign("base", #till()
+                  Material(soil_params, hydro_model)
                   #till_curve_RAF()
                   )
-    domain.assign("GI", terreau()
-                  #terreau_curve_RAF()
+    domain.assign("GI", #terreau()
+                  terreau_curve_RAF()
                   )
 
     # ==========================================

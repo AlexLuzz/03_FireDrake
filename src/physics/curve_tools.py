@@ -105,7 +105,6 @@ class CurveInterpolator:
     Generic 1D curve interpolation with smart extrapolation
     Works for ANY property relationship
     """
-    
     def __init__(self, 
                  curve_data: CurveData,
                  method: Literal['linear', 'cubic'] = 'linear',

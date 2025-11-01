@@ -338,38 +338,24 @@ class CurveBasedHydraulicModel(HydraulicModel):
         return max(0.0, min(1.0, Se))
     
     @classmethod
-    def from_library(cls, soil_type: str, smooth_window: int = 1, **kwargs):
+    def from_library(cls, curveData: list[CurveData], smooth_window: int = 1, **kwargs):
         """
         Create model from predefined library curves
-        
         Parameters:
         -----------
-        soil_type : str
-            'till' or 'terreau'
         smooth_window : int
             Window size for smoothing (1 = no smoothing)
         **kwargs : additional parameters for __init__
         """
-        # Import here to avoid circular dependency
-        from ..library.soils_from_curve import HydraulicCurves
-        
-        soil_type = soil_type.lower()
-        
-        if soil_type == "till":
-            theta_curve = HydraulicCurves.till_theta()
-            kr_curve = HydraulicCurves.till_kr()
-        elif soil_type == "terreau":
-            theta_curve = HydraulicCurves.terreau_theta()
-            kr_curve = HydraulicCurves.terreau_kr()
-        else:
-            raise ValueError(f"Unknown soil type: {soil_type}. Available: 'till', 'terreau'")
-        
+        if not curveData:
+            raise ValueError("No curve data provided for library model")
+        theta_curve = curveData[0]
+        kr_curve = curveData[1]
         if smooth_window > 1:
             theta_curve = theta_curve.smooth(smooth_window)
             kr_curve = kr_curve.smooth(smooth_window)
-        
         return cls(theta_curve, kr_curve, **kwargs)
-    
+
     @classmethod
     def from_data(cls, 
                   pressure_heads: np.ndarray,

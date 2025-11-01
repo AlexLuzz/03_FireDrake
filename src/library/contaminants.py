@@ -20,9 +20,18 @@ class ContaminantProperties:
             self.alpha_T = self.alpha_L / 10.0
     
     @classmethod
-    def chloride(cls, alpha_L: float = 0.01):
+    def chloride(cls, alpha_L: float = 1):
         """Cl⁻ - conservative tracer"""
-        return cls(name="Chloride", Dd=2.03e-6, Kd=0.0, alpha_L=alpha_L)
+        return cls(name="Chloride", Dd=2.03e-9, Kd=0.0, alpha_L=alpha_L)
+    
+    @classmethod
+    def chloride_test(cls, alpha_L: float = 1):
+        """Cl⁻ - conservative tracer"""
+        return cls(name="Chloride test", 
+                   Dd=2.03e-7,      # Higher diffusion for testing (faster spreading)
+                   Kd=0.0,          # Conservative, no sorption
+                   lambda_=0.0,     # Non-reactive, no degradation
+                   alpha_L=alpha_L)
     
     @classmethod
     def sodium(cls, alpha_L: float = 0.01):

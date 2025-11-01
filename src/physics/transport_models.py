@@ -42,7 +42,7 @@ class AnalyticalTransportModel(TransportModel):
     
     def __init__(self, 
                  properties: ContaminantProperties,
-                 bulk_density: float = 1600.0,
+                 bulk_density: float,
                  tortuosity_model: str = 'millington_quirk'):
         """
         Parameters:

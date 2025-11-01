@@ -21,10 +21,6 @@ class MaterialField:
         self.V = function_space
         self.transport = transport
         self.geophysics = geophysics
-
-        # Geophysical model settings (optional)
-        self.archie_params = None
-        self.fluid_resistivity = 25.0  # Default clean water [Ω·m]
     
     def _compute_field(self, state_functions, property_func):
         """
@@ -69,20 +65,19 @@ class MaterialField:
     # =========================================
     # GENERIC FIELDS
     # =========================================
-    def get_rho_d_field(self):
+    def get_rho_b_field(self):
         """ρ_b: Bulk density [kg/m³]"""
-        return self._compute_field(None, lambda mat: mat.transport.rho_b 
-                                   if mat.transport else 0.0)
+        return self._compute_field(None, lambda mat: mat.soil.rho_b)
     
     def get_saturation_field(self, pressure_function):
         """S(p): Saturation = θ / φ [-]"""
         return self._compute_field(pressure_function, lambda mat, 
-                                   p: mat.hydraulic._theta(p)/mat.porosity)
+                                   p: mat.hydraulic._theta(p)/mat.soil.porosity)
     
     # Not used
     def get_porosity_field(self):
         """φ: Porosity [-]"""
-        return self._compute_field(None, lambda mat: mat.porosity)
+        return self._compute_field(None, lambda mat: mat.soil.porosity)
     
     # =========================================
     # HYDRAULIC FIELDS
@@ -110,7 +105,7 @@ class MaterialField:
     def get_K_field(self, pressure_function):
         """K(p): Hydraulic conductivity [m/s]"""
         return self._compute_field(pressure_function, lambda mat, 
-                                   p: mat.hydraulic._k(p, mat.Ks))
+                                   p: mat.hydraulic._k(p, mat.soil.Ks))
 
     # Used for Richards results visualization and to compute water level
     def get_Se_field(self, pressure_function):
