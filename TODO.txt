@@ -3,15 +3,16 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [x-ish] Improve from_library logic, overal material params, maybe centralize the library - MAKE IT READABLE
     - [ ] D0 problem OR just values too low and mass loss 
         (i.e. need for fancy darcy post-processing and DG ?)
     - [x-ish] Save pdf instead of png, with all parameters
+    - [ ] Add processing duration in config and add it to the report
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
-    - [ ] Process time tracking to evaluate the ratio 
+    - [ ] Track processing time to evaluate what takes time, and ...
     
     ## Medium Priority ⚡
     - [ ] Improve functionSpace and boundary conditions declaration logic
+    - [ ] Import curves from txt/csv
     - [ ] Hybrid display on results, plot water table / rain mm / salt flux (maybe just tweak the source_term plot)
     - [ ] Implement test script with ANALYTICAL solution for validation
 
@@ -25,6 +26,7 @@
 
 
 ## ✅ Completed
+- [x] Improve from_library logic, overal material params, maybe centralize the library - MAKE IT READABLE
 - [x] Improve plotters logic, it sucks
 - [x] Major update of physics/field_maping interaction
 - [x] Correct Result plotter : as is can't not plot measured and comsol ...

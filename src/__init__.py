@@ -66,11 +66,7 @@ from .visualization import (
 from .world import (
     Domain,
     MaterialField,
-    Material,
-    till,
-    terreau,
-    till_curve_RAF,
-    terreau_curve_RAF
+    Material
 )
 
 __version__ = "0.1.0"
@@ -87,8 +83,6 @@ __all__ = [
     'MaterialField',
     'VanGenuchtenModel', 
     'CurveBasedHydraulicModel',
-    'till',
-    'terreau',
     'AnalyticalTransportModel',
     'archie_resistivity',
     
@@ -121,9 +115,5 @@ __all__ = [
     # World
     'Domain',
     'MaterialField',
-    'Material',
-    'till',
-    'terreau',
-    'till_curve_RAF',
-    'terreau_curve_RAF'
+    'Material'
 ]

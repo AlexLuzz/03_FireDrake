@@ -34,8 +34,8 @@ def plot_material_curves(materials_dict, filename=None, figsize=(20, 4)):
         
         # Extract parameters based on material type
         param_text += f"{mat_name}:\n"
-        param_text += f"  Ks = {material.Ks:.2e} m/s\n"
-        param_text += f"  φ = {material.porosity:.3f} -\n"
+        param_text += f"  Ks = {material.soil.Ks:.2e} m/s\n"
+        param_text += f"  φ = {material.soil.porosity:.3f} -\n"
         
         # Add hydraulic model specific parameters
         if hasattr(hydraulic, 'params'):  # VanGenuchtenModel
@@ -231,7 +231,7 @@ def plot_domain_geometry(domain, boundary_conditions=None, water_table_level=Non
     if boundary_conditions is not None:
         # Import here to avoid circular imports
         from .result_plotter import ResultsPlotter
-        plotter = ResultsPlotter(domain=domain)
+        plotter = ResultsPlotter(None, domain.mesh)
         plotter.plot_water_table(ax, t=0.0, bc_manager=boundary_conditions, domain=domain)
     
     # Draw constant water table if provided and no BC manager

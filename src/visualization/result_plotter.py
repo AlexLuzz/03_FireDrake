@@ -288,7 +288,7 @@ def add_probe_markers(ax, probe_positions: List[Tuple], colors: List[str] = None
 class ResultsPlotter:
     """Orchestrates complete visualization from managers"""
     
-    def __init__(self, config, mesh, probe_manager=None, rain_scenario=None,
+    def __init__(self, config=None, mesh=None, probe_manager=None, rain_scenario=None,
                  domain=None, snapshot_manager=None, bc_manager=None,
                  field_configs: Dict[str, PlotFieldConfig] = None,
                  timeseries_configs: Dict[str, PlotTimeSeriesConfig] = None):
@@ -438,7 +438,7 @@ class ResultsPlotter:
         if len(times_plot) > 0:
             ax.set_xlim(times_plot[0], times_plot[-1])
     
-    def plot_water_table(self, ax, t, bc_manager, domain=None, use_datetime=False):
+    def plot_water_table(self, ax, t, bc_manager, domain=None):
         """
         Plot water table line(s) from boundary conditions on spatial plots
         

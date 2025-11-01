@@ -76,8 +76,8 @@ def main_transport():
     # ==========================================
     # 5. MATERIALS WITH TRANSPORT
     # ==========================================
-    domain.assign("base", till_curve_RAF(transport=True))
-    #domain.assign("GI", terreau_curve_RAF(transport=True))
+    domain.assign("base", Material.till_curve_RAF(transport=True))
+    #domain.assign("GI", Material.terreau_curve_RAF(transport=True))
 
     # ==========================================
     # 6. FIELD MAPPING

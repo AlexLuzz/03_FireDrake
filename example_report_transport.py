@@ -15,8 +15,8 @@ def main_transport():
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 5, 15),
-        dt_td=timedelta(hours=6)
+        end_datetime=datetime(2024, 12, 30),
+        dt_td=timedelta(hours=2)
     )
     
     rain_zones = [
@@ -33,10 +33,10 @@ def main_transport():
     chloride_source = SourceScenario(time_unit="hours", rate_unit_conversion=1.0/3600.0)
     chloride_source.add_zone("deicing_zone", x_min=9.0, x_max=11.0, y_min=4.8, y_max=5.0, multiplier=1.0)
     chloride_source.add_event(name="deicing_zone", start=config.t_end_hours*0.05,
-                             end=config.t_end_hours*0.3, rate=0.1, zones="deicing_zone")
+                             end=config.t_end_hours*0.1, rate=0.02, zones="deicing_zone")
     
     domain = Domain(nx=80, ny=40, Lx=20.0, Ly=5.0)
-    domain.assign("base", till_curve_RAF(transport=True))
+    domain.assign("base", Material.till())
     
     V = FunctionSpace(domain.mesh, "CG", 1)
     field_map = MaterialField(domain, V)

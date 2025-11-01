@@ -16,7 +16,7 @@ def main():
         name="Datetime_Duration",
         start_datetime=datetime(2024, 4, 15),
         end_datetime=datetime(2024, 4, 30),
-        dt_td=timedelta(hours=3)
+        dt_td=timedelta(hours=12)
     )
     
     rain_zones = [
@@ -34,9 +34,9 @@ def main():
     
     domain = Domain(nx=80, ny=40, Lx=20.0, Ly=5.0)
     domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
-    
-    domain.assign("base", till_curve_RAF())
-    domain.assign("GI", terreau_curve_RAF())
+
+    domain.assign("base", Material.till())
+    domain.assign("GI", Material.terreau())
 
     V = FunctionSpace(domain.mesh, "CG", 1)
     field_map = MaterialField(domain, V)
