@@ -10,9 +10,9 @@ def main():
     # ==========================================
     config = SimulationConfig(
         name="Datetime_Duration",
-        start_datetime=datetime(2024, 4, 1),
-        end_datetime=datetime(2024, 4, 30),
-        dt_td=timedelta(hours=12)
+        start_datetime=datetime(2024, 4, 15),
+        end_datetime=datetime(2024, 5, 15),
+        dt_td=timedelta(hours=6)
     )
     
     # ==========================================
@@ -45,14 +45,9 @@ def main():
     # ==========================================
     # 4. MATERIALS (properties)
     # ==========================================
-    
-    domain.assign("base", #till()
-                  #Material(soil_params, hydro_model)
-                  Material.till_curve_RAF()
-                  )
-    domain.assign("GI", #terreau()
-                  Material.terreau_curve_RAF()
-                  )
+
+    domain.assign("base", Material.till_curve_RAF())
+    domain.assign("GI", Material.terreau_curve_RAF())
 
     # ==========================================
     # 5. MAPPING (connect materials to domain)

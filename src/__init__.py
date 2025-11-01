@@ -42,7 +42,8 @@ from .setup import (
 from .solver import (
     RichardsSolver,
     TransportSolver,
-    BoundaryConditionManager
+    BoundaryConditionManager,
+    TransportSolverAnalytical
 )
 
 # Tools
@@ -56,10 +57,8 @@ from .tools import (
 # Visualization
 from .visualization import (
     ResultsPlotter,
-    GifAnimator,
-    SimulationReport,
-    plot_material_curves,
-    plot_domain_geometry
+    BasicPlotting,
+    SimulationReport
 )
 
 # World
@@ -98,6 +97,7 @@ __all__ = [
     'RichardsSolver',
     'TransportSolver', 
     'BoundaryConditionManager',
+    'TransportSolverAnalytical',
     
     # Tools
     'CSVLoader',
@@ -107,10 +107,8 @@ __all__ = [
 
     # Visualization
     'ResultsPlotter',
-    'GifAnimator',
+    'BasicPlotting',
     'SimulationReport',
-    'plot_material_curves',
-    'plot_domain_geometry',
 
     # World
     'Domain',

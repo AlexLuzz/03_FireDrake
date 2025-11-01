@@ -28,9 +28,6 @@ class TransportSolverAnalytical:
         config : Config
             Simulation configuration
         """
-        if not field_map.has_transport():
-            raise ValueError("MaterialField must have transport models assigned")
-        
         self.mesh = domain.mesh
         self.V = V
         self.V_vec = VectorFunctionSpace(self.mesh, "CG", 1)  # For velocity
@@ -60,11 +57,7 @@ class TransportSolverAnalytical:
         Compute total mass in the system for mass balance checking
         M = ∫ θ c dV
         """
-        if theta is None:
-            pressure = self.pressure_solver.p_n
-            theta = self.field_map.get_theta_field(pressure)
-        else:
-            theta = Constant(theta)
+        theta = Constant(theta)
         total_mass = assemble(theta * self.c_new * self.dx)
         return total_mass
     

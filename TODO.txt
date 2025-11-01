@@ -8,7 +8,7 @@
     - [x-ish] Save pdf instead of png, with all parameters
     - [ ] Add processing duration in config and add it to the report
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
-    - [ ] Track processing time to evaluate what takes time, and ...
+
     
     ## Medium Priority ⚡
     - [ ] Improve functionSpace and boundary conditions declaration logic
@@ -19,6 +19,7 @@
     ## Side-side project that will never see the light
     - [ ] Use pyTorch and code a optimization loop to auto-fit parameters ! (probably doable for richard's)
     - [ ] TRY some uncertainty evaluation with bayesian simulation using PYRO ????
+    - [ ] Track processing time to evaluate what takes time, and ...
 
     ## ULTRA Low Priority 💡
     - [ ] Code cleanup
