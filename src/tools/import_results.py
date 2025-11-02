@@ -138,23 +138,6 @@ def load_measured_data(csv_path: Union[str, Path] = None,
     return result
 
 
-def calculate_residuals(data_a: Dict, data_b: Dict) -> Dict:
-    """Calculate residuals: simulation - reference (interpolated to sim times)"""
-    residuals = {'times': data_a['times']}
-    
-    for key in data_a.keys():
-        if key != 'times' and key in data_b:
-            # Interpolate reference to simulation times
-            interp_func = interp1d(
-                data_b['times'], data_b[key],
-                kind='linear', bounds_error=False, fill_value=np.nan
-            )
-            ref_interp = interp_func(data_a['times'])
-            residuals[key] = data_a[key] - ref_interp
-    
-    return residuals
-
-
 def preview_data(comsol_data: Optional[Dict],
                 measured_data: Optional[Dict] = None,
                 time_converter: Optional[TimeConverter] = None,
