@@ -55,8 +55,9 @@ DEFAULT_FIELDS = {
         label='Concentration',
         units='mg/L',
         colormap='Spectral_r',
-        vmin=0,
-        transform_func=lambda x: np.array(x) * 1e3
+        # vmin computed dynamically to support log scaling even with zeros present
+        transform_func=lambda x: np.array(x) * 1e3,
+        use_log_scale=True
     ),
     'pressure': FieldConfig(
         field_name='pressure',

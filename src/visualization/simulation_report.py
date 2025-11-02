@@ -78,17 +78,23 @@ class SimulationReport(BasicPlotting):
             
             # Page 2: Concentration time series
             print("  - Time series page")
-            fig = self._create_timeseries_page(plotter, 'concentration')
+            fig = self._create_timeseries_page(plotter, 'concentration', compare=False)
             pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
             
             # Page 3: Concentration snapshots
-            if plotter.snapshot_manager:
-                print("  - Snapshots page")
-                fig = self._create_snapshots_page(plotter, 'concentration')
-                pdf.savefig(fig, bbox_inches='tight')
-                plt.close(fig)
-            
+            print("  - Snapshots page")
+            fig = self._create_snapshots_page(plotter, 'concentration')
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+
+            # Page 4: Mass loss time series
+            # Optional: Mass loss / mass change page (if available)
+            print("  - Mass loss page")
+            fig = self._create_mass_loss_page(plotter, 'mass_loss')
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+
             # PDF metadata
             d = pdf.infodict()
             d['Title'] = 'Coupled Flow-Transport Simulation Report'
@@ -210,13 +216,13 @@ class SimulationReport(BasicPlotting):
                     fontsize=16, fontweight='bold', y=0.98)
         return fig
     
-    def _create_timeseries_page(self, plotter, field_type):
+    def _create_timeseries_page(self, plotter, field_type, compare=True):
         """Create time series page using ResultsPlotter"""
         plotting_config = {
             'time_series_fields': [field_type],
             'plot_snapshots': False,
-            'plot_comsol_comparison': True,
-            'plot_measured_comparison': True
+            'plot_comsol_comparison': compare,
+            'plot_measured_comparison': compare
         }
         
         fig = plotter.plot_complete_results(plotting_config=plotting_config, return_figure=True)
@@ -254,6 +260,58 @@ class SimulationReport(BasicPlotting):
         }
         fig.suptitle(title_map.get(field_type, f'{field_type.upper()} - SPATIAL DISTRIBUTION'),
                     fontsize=16, fontweight='bold', y=0.98)
+        return fig
+
+    def _create_mass_loss_page(self, plotter, mass_keys_or_name=None):
+        """Create a page with delta mass and cumulative mass change time series.
+        Accepts either a list of candidate keys or a single preferred key name.
+        Falls back to auto-detect keys containing 'mass'.
+        """
+        pdata = plotter.probe_manager.get_data()
+        global_data = pdata.get('global', {})
+
+        # Resolve which series to use
+        keys = list(global_data.keys())
+        keys_norm = {k.lower().replace('_', ' '): k for k in keys}
+
+        chosen_key = None
+        if isinstance(mass_keys_or_name, str) and mass_keys_or_name:
+            candidates = [mass_keys_or_name, mass_keys_or_name.replace('_', ' '), mass_keys_or_name.replace(' ', '_')]
+            for cand in candidates:
+                norm = cand.lower().replace('_', ' ')
+                if norm in keys_norm:
+                    chosen_key = keys_norm[norm]
+                    break
+        elif isinstance(mass_keys_or_name, (list, tuple)) and mass_keys_or_name:
+            for cand in mass_keys_or_name:
+                norm = str(cand).lower().replace('_', ' ')
+                if norm in keys_norm:
+                    chosen_key = keys_norm[norm]
+                    break
+
+        # Auto-detect if still not found
+        if chosen_key is None:
+            for k in keys:
+                if 'mass' in k.lower():
+                    chosen_key = k
+                    break
+
+        if chosen_key is None:
+            return self._create_no_snapshots_placeholder('MASS BALANCE - TIME SERIES')
+
+        delta = np.array(global_data[chosen_key], dtype=float)
+        cumulative = np.cumsum(delta)
+
+        fig, axes = plt.subplots(2, 1, figsize=(11, 8.5), sharex=True)
+
+        plotter.plot_simple_timeseries(axes[0], {chosen_key: delta}, label='ΔMass', units='kg')
+        axes[0].set_title('Mass Change per Step', fontweight='bold')
+
+        plotter.plot_simple_timeseries(axes[1], {f'Cumulative {chosen_key}': cumulative}, label='Cumulative ΔMass', units='kg')
+        axes[1].set_title('Cumulative Mass Change', fontweight='bold')
+
+        fig.suptitle('MASS BALANCE - TIME SERIES', fontsize=16, fontweight='bold', y=0.98)
+        plt.tight_layout()
         return fig
     
     # ============================================================================
@@ -387,6 +445,8 @@ Duration: {config.t_end_hours:.1f} hours ({config.t_end/(24*3600):.1f} days)
 Time Step: {config.dt:.1f} seconds
 
 Domain: {domain.Lx} m × {domain.Ly} m | Mesh: {domain.nx} × {domain.ny}
+
+Simulation duration (real time): {config.real_time_duration}
 """
         ax.text(0.1, 0.95, config_text, transform=ax.transAxes, fontsize=11,
                verticalalignment='top', fontfamily='monospace',

@@ -15,8 +15,8 @@ def main():
     config = SimulationConfig(
         name="Datetime_Duration",
         start_datetime=datetime(2024, 4, 15),
-        end_datetime=datetime(2024, 5, 1),
-        dt_td=timedelta(hours=6)
+        end_datetime=datetime(2024, 6, 30),
+        dt_td=timedelta(hours=1)
     )
     
     rain_zones = [
@@ -32,11 +32,11 @@ def main():
         zones=rain_zones
     )
     
-    domain = Domain(nx=80, ny=40, Lx=20.0, Ly=5.0)
+    domain = Domain(nx=140, ny=70, Lx=20.0, Ly=5.0)
     domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
 
-    domain.assign("base", Material.till_curve_RAF())
-    domain.assign("GI", Material.terreau_curve_RAF())
+    domain.assign("base", Material.till())
+    domain.assign("GI", Material.terreau())
 
     V = FunctionSpace(domain.mesh, "CG", 1)
     field_map = MaterialField(domain, V)
@@ -54,9 +54,7 @@ def main():
     )
     
     solver.run(probe_manager, snapshot_manager)
-    
-    now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    
+        
     plotter = ResultsPlotter(
         config, domain.mesh,
         probe_manager=probe_manager,
@@ -66,9 +64,7 @@ def main():
         bc_manager=bc_manager
     )
     
-    # ==========================================
-    # NEW: ADD REPORT GENERATION (3 LINES!)
-    # ==========================================
+    config.get_sim_duration()
     report = SimulationReport(output_dir=config.output_dir)
     report.print_richards_report(config, domain, plotter, 
                                 boundary_conditions=bc_manager)

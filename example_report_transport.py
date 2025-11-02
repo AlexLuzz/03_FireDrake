@@ -15,8 +15,8 @@ def main_transport():
     config = SimulationConfig(
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
-        end_datetime=datetime(2024, 12, 30),
-        dt_td=timedelta(hours=2)
+        end_datetime=datetime(2024, 5, 10),
+        dt_td=timedelta(hours=1)
     )
     
     rain_zones = [
@@ -30,13 +30,13 @@ def main_transport():
         zones=rain_zones
     )
     
-    chloride_source = SourceScenario(time_unit="hours", rate_unit_conversion=1.0/3600.0)
+    chloride_source = SourceScenario(time_unit="hours", rate_unit_conversion=1.0)
     chloride_source.add_zone("deicing_zone", x_min=9.0, x_max=11.0, y_min=4.8, y_max=5.0, multiplier=1.0)
     chloride_source.add_event(name="deicing_zone", start=config.t_end_hours*0.05,
-                             end=config.t_end_hours*0.1, rate=0.02, zones="deicing_zone")
+                             end=config.t_end_hours*0.1, rate=0.01, zones="deicing_zone")
     
-    domain = Domain(nx=80, ny=40, Lx=20.0, Ly=5.0)
-    domain.assign("base", Material.till())
+    domain = Domain(nx=200, ny=100, Lx=20.0, Ly=5.0)
+    domain.assign("base", Material.till_curve_RAF('chloride_test'))
     
     V = FunctionSpace(domain.mesh, "CG", 1)
     field_map = MaterialField(domain, V)
@@ -68,20 +68,6 @@ def main_transport():
                             rain_scenario=rain_source, domain=domain, bc_manager=bc_manager,
                             snapshot_manager=snapshot_manager)
     
-    plotting_config = {
-        'time_series_fields': ['concentration'],
-        'plot_comsol_comparison': False,
-        'plot_measured_comparison': False,
-        'plot_snapshots': True,
-        'snapshot_fields': ['concentration'],
-        'snapshot_overlay': False
-    }
-    
-    plotter.plot_complete_results(
-        filename=config.output_dir / f'chloride_transport_{now}.png',
-        plotting_config=plotting_config
-    )
-    
     # ==========================================
     # NEW: ADD REPORT GENERATION
     # ==========================================
@@ -95,12 +81,13 @@ def main_transport():
         'Bulk Density': '1600 kg/m³'
     }
     
+    config.get_sim_duration()
+
     report = SimulationReport(output_dir=config.output_dir)
     report.print_transport_report(
-        config, domain, field_map, plotter,
+        config, domain, plotter,
         contaminant_props=contaminant_props,
-        filename=config.output_dir / f'report_transport_{now}.pdf',
-        include_richards=False  # Set True if you want flow results too
+        filename=f'report_transport_{now}.pdf'
     )
     
 if __name__ == "__main__":

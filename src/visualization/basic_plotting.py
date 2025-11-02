@@ -5,6 +5,7 @@ import numpy as np
 from scipy.interpolate import LinearNDInterpolator, interp1d
 from typing import Dict, List, Tuple, Optional
 from .plot_configs import FieldConfig, TimeSeriesStyle
+from matplotlib.colors import LogNorm
 
 
 class BasicPlotting:
@@ -59,17 +60,38 @@ class BasicPlotting:
         
         if vmin is None or vmax is None:
             vmin, vmax = BasicPlotting.calculate_colorbar_range(z, field_config)
+
+        # Replace masked/NaNs from interpolation (outside convex hull) to avoid white gaps
+        # Use a safe fill value depending on scale
+        if np.ma.isMaskedArray(Zi):
+            Zi = Zi.filled(np.nan)
+        if not np.isfinite(Zi).all():
+            # For log scale we only enable LogNorm when vmin>0
+            fill_val = vmin if not (field_config.use_log_scale and vmin > 0) else max(vmin, np.finfo(float).tiny)
+            Zi = np.where(np.isfinite(Zi), Zi, fill_val)
+
+        # For log scale, ensure zeros and tiny values are lifted to vmin to avoid transparent/white
+        if field_config.use_log_scale and vmin > 0:
+            Zi = np.maximum(Zi, max(vmin, np.finfo(float).tiny))
         
         Zi = np.clip(Zi, vmin, vmax)
         
         if field_config.use_log_scale and vmin > 0:
             levels = np.logspace(np.log10(vmin), np.log10(vmax), field_config.contour_levels)
+            norm = LogNorm(vmin=max(vmin, np.finfo(float).tiny), vmax=vmax)
         else:
             levels = np.linspace(vmin, vmax, field_config.contour_levels)
+            norm = None
         
-        cf = ax.contourf(Xi, Yi, Zi, levels=levels,
-                        cmap=field_config.colormap,
-                        vmin=vmin, vmax=vmax, extend='max')
+        cf = ax.contourf(
+            Xi, Yi, Zi,
+            levels=levels,
+            cmap=field_config.colormap,
+            norm=norm if norm is not None else None,
+            vmin=None if norm is not None else vmin,
+            vmax=None if norm is not None else vmax,
+            extend='both'
+        )
         
         ax.set_xlabel('x (m)', fontsize=10)
         ax.set_ylabel('y (m)', fontsize=10)
@@ -136,7 +158,8 @@ class BasicPlotting:
     @staticmethod
     def add_probe_markers(ax, probe_positions: List[Tuple], colors: List[str] = None):
         if colors is None:
-            colors = ['#1f77b4', '#2ca02c', '#d62728']
+            base_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+            colors = [base_colors[i % len(base_colors)] for i in range(len(probe_positions))]
         
         for i, (x, y) in enumerate(probe_positions):
             ax.plot(x, y, '*', color=colors[i % len(colors)],
@@ -152,26 +175,48 @@ class BasicPlotting:
     
     @staticmethod
     def calculate_colorbar_range(data: np.ndarray, field_config: FieldConfig) -> Tuple[float, float]:
+        # If explicitly set, honor fixed bounds
         if field_config.vmin is not None and field_config.vmax is not None:
             return field_config.vmin, field_config.vmax
-        
+
         data_clean = data[np.isfinite(data)]
-        if len(data_clean) > 0:
-            p995, p005 = np.percentile(data_clean, [99.5, 0.5])
-            data_clean = data_clean[(data_clean >= p005) & (data_clean <= p995)]
-        
         if len(data_clean) == 0:
             return 0, 1
-        
-        vmin = max(0.0, np.min(data_clean)) if field_config.vmin is None else field_config.vmin
-        vmax = np.max(data_clean) if field_config.vmax is None else field_config.vmax
-        
-        if vmax == vmin:
-            vmax = vmin + 1e-10
-        if vmax / max(vmin, 1e-10) > 1e6:
-            vmax = vmin + 1000
-        
-        return vmin, vmax
+
+        if field_config.use_log_scale:
+            # For log scale, ignore non-positive values and use robust percentiles
+            pos = data_clean[data_clean > 0]
+            if len(pos) == 0:
+                # No positive values; fall back to linear small range
+                return 0, 1
+
+            vmax = np.percentile(pos, 99.0) if field_config.vmax is None else field_config.vmax
+            # pick a small, but positive vmin based on low percentile of positive values
+            vmin_candidate = np.percentile(pos, 1.0) if field_config.vmin is None else field_config.vmin
+            # Guard against vmin >= vmax
+            vmin = min(vmin_candidate, vmax / 10.0)
+            # Ensure strictly positive vmin
+            vmin = max(vmin, np.min(pos[pos > 0]) * 0.5, np.finfo(float).tiny)
+
+            # Cap extreme dynamic ranges to avoid unreadable colorbars
+            ratio = vmax / max(vmin, np.finfo(float).tiny)
+            if ratio > 1e8:
+                vmin = vmax / 1e8
+
+            return float(vmin), float(vmax)
+        else:
+            # Linear scale: trim extremes and compute bounds
+            p995, p005 = np.percentile(data_clean, [99.5, 0.5])
+            trimmed = data_clean[(data_clean >= p005) & (data_clean <= p995)]
+            if len(trimmed) == 0:
+                trimmed = data_clean
+
+            vmin = max(0.0, float(np.min(trimmed))) if field_config.vmin is None else field_config.vmin
+            vmax = float(np.max(trimmed)) if field_config.vmax is None else field_config.vmax
+
+            if vmax <= vmin:
+                vmax = vmin + 1e-12
+            return vmin, vmax
     
     @staticmethod
     def plot_water_table(ax, t: float, bc_manager, domain):

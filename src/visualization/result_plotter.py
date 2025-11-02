@@ -195,6 +195,41 @@ class ResultsPlotter(BasicPlotting):
         ax.set_ylabel(f'Residual ({field_config.units})\n[{ref_name} - Firedrake]',
                      fontsize=11, fontweight='bold')
         ax.grid(True, alpha=0.3)
+
+    # -----------------------------
+    # Simple generic timeseries plotter for report pages
+    # -----------------------------
+    def plot_simple_timeseries(self, ax, series_dict, label='Value', units=''):
+        """
+        Plot simple time series from a dict {display_name: values} on the given axis.
+        Uses the report's standard styling and the time base from the simulation config.
+        """
+        if not self.probe_manager:
+            raise ValueError('probe_manager is required to plot time series')
+
+        data_all = self.probe_manager.get_data()
+        times_sim = data_all['times']
+        use_datetime = hasattr(self.config, 'time_converter') and self.config.time_converter is not None
+        times_plot = [self.config.time_converter.to_datetime(t) for t in times_sim] if use_datetime else (times_sim / 3600.0)
+
+        # Align times to series lengths (e.g., global series like mass loss often lack the initial t=0)
+        series_lengths = [len(v) for v in series_dict.values() if hasattr(v, '__len__')]
+        if series_lengths:
+            n = min(len(times_plot), min(series_lengths))
+            # Prefer aligning to the most recent n samples to match step-based series (skip initial t=0)
+            if len(times_plot) != n:
+                times_plot = times_plot[-n:]
+            # Trim each series to the last n entries
+            series_dict = {k: (np.asarray(v)[-n:] if hasattr(v, '__len__') else v)
+                           for k, v in series_dict.items()}
+
+        # Build data dict with 'times' + named series
+        data_for_plot = {'times': times_plot}
+        data_for_plot.update(series_dict)
+
+        tmp_field = FieldConfig(field_name='custom', label=label, units=units)
+        self.plot_timeseries(ax, times_plot, data_for_plot, tmp_field, self.timeseries_styles['simulation'])
+        self.format_time_axis(ax, use_datetime, show_xlabel=True)
     
     def _plot_snapshots_grid(self, fig, gs, snapshots, field_names, start_row, use_datetime):
         sorted_times = sorted(snapshots.keys())[:6]
@@ -230,10 +265,26 @@ class ResultsPlotter(BasicPlotting):
                     ax.set_xlim(0, self.domain.Lx)
                     ax.set_ylim(0, self.domain.Ly)
             
-            cbar_ax = fig.add_axes([0.92, 0.11 + field_idx * 0.3, 0.02, 0.25])
+            cbar_ax = fig.add_axes([0.92, 0.25, 0.02, 0.35])
             cbar = fig.colorbar(cf, cax=cbar_ax)
             cbar.set_label(f'{field_config.label} ({field_config.units})',
                           fontsize=12, fontweight='bold')
+
+            # For log-scale fields, prefer linearly spaced tick values over decades
+            if getattr(field_config, 'use_log_scale', False) and cf.norm is not None:
+                vmin = float(cf.norm.vmin)
+                vmax = float(cf.norm.vmax)
+                n_ticks = 6
+                # Choose tick values spaced evenly in colorbar position (log-spaced in value)
+                ticks = np.logspace(np.log10(max(vmin, np.finfo(float).tiny)), np.log10(vmax), n_ticks)
+                cbar.set_ticks(ticks)
+                # Nicely formatted labels (scientific if very small/large)
+                def _fmt(v):
+                    av = abs(v)
+                    if (av > 0 and av < 1e-2) or av >= 1e4:
+                        return f"{v:.1e}"
+                    return f"{v:.3g}"
+                cbar.set_ticklabels([_fmt(t) for t in ticks])
     
     def _load_comparison_data(self, data_type, config):
         try:

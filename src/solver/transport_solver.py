@@ -214,8 +214,6 @@ class TransportSolver:
         if snapshot_manager is not None:
             snapshot_manager.record(t, self.c_new, "concentration")
 
-        mass_residual_balance = []
-
         for step in range(self.config.num_steps):
             t += self.config.dt
             
@@ -228,11 +226,12 @@ class TransportSolver:
             self.solve_timestep(t)
 
             m_new = self.compute_mass_balance()
-            mass_residual_balance.append(m_new - m_n)
             
             # Recording
             if probe_manager is not None:
                 probe_manager.record(t, self.c_new, "concentration")
+                probe_manager.record(t, data=m_new - m_n, field_name="mass_loss")
+
             if snapshot_manager is not None:
                 if snapshot_manager.should_record(t, self.config.dt):
                     snapshot_manager.record(t, self.c_new, "concentration")
@@ -248,4 +247,3 @@ class TransportSolver:
                       end='', flush=True)
         
         print("\n\nCoupled simulation complete!")
-        print(f"Mass balance residuals (should be near zero):{mass_residual_balance}")

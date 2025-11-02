@@ -31,6 +31,8 @@ class SimulationConfig:
     # Computed fields
     num_steps: int = field(init=False)
     time_converter: Optional[object] = field(init=False, default=None)
+    real_time_start: datetime = field(init=False, default=None)
+    real_time_duration: datetime = None
     
     # Output settings
     output_dir: Path = Path("./results")
@@ -60,6 +62,8 @@ class SimulationConfig:
     
     def __post_init__(self):
         """Initialize computed fields and handle datetime conversion"""
+        self.real_time_start = datetime.now()
+
         # If datetime parameters provided, convert to seconds
         if self.start_datetime is not None:
             self.time_converter = TimeConverter(self.start_datetime)
@@ -97,3 +101,7 @@ class SimulationConfig:
         
         print(f"  Time step: {self.dt}s ({self.dt/3600:.2f} hours)")
         print(f"  Number of steps: {self.num_steps}")
+
+    def get_sim_duration(self):
+        self.real_time_duration = datetime.now() - self.real_time_start
+        return self.real_time_duration

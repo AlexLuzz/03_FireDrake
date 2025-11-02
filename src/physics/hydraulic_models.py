@@ -42,6 +42,8 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import numpy as np
 from .curve_tools import CurveData, CurveInterpolator
+from scipy.optimize import differential_evolution, minimize
+from typing import Literal, Optional, Dict, Tuple
 
 # ==============================================
 # ABSTRACT BASE CLASS
@@ -336,25 +338,6 @@ class CurveBasedHydraulicModel(HydraulicModel):
         theta = self._theta(pressure)
         Se = (theta - self._theta_r) / (self._theta_s - self._theta_r)
         return max(0.0, min(1.0, Se))
-    
-    @classmethod
-    def from_library(cls, curveData: list[CurveData], smooth_window: int = 1, **kwargs):
-        """
-        Create model from predefined library curves
-        Parameters:
-        -----------
-        smooth_window : int
-            Window size for smoothing (1 = no smoothing)
-        **kwargs : additional parameters for __init__
-        """
-        if not curveData:
-            raise ValueError("No curve data provided for library model")
-        theta_curve = curveData[0]
-        kr_curve = curveData[1]
-        if smooth_window > 1:
-            theta_curve = theta_curve.smooth(smooth_window)
-            kr_curve = kr_curve.smooth(smooth_window)
-        return cls(theta_curve, kr_curve, **kwargs)
 
     @classmethod
     def from_data(cls, 
@@ -386,3 +369,375 @@ class CurveBasedHydraulicModel(HydraulicModel):
             kr_curve = kr_curve.smooth(smooth_window)
         
         return cls(theta_curve, kr_curve, **kwargs)
+    
+    def fit_van_genuchten(self, 
+                            method: Literal['minimize', 'differential_evolution'] = 'minimize',
+                            fit_kr: bool = True,
+                            weight_theta: float = 1.0,
+                            weight_kr: float = 1.0,
+                            initial_guess: Optional[Dict[str, float]] = None,
+                            verbose: bool = True) -> Tuple[VanGenuchtenParams, Dict]:
+        """
+        Fit Van Genuchten parameters to match the empirical curves
+        
+        This is useful for:
+        1. Converting curve data to analytical form (faster evaluation)
+        2. Checking if Van Genuchten model can represent your data
+        3. Getting smooth derivatives (VG is C∞, curves have numerical noise)
+        
+        Parameters:
+        -----------
+        method : str
+            'minimize': Fast local optimization (needs good initial guess)
+            'differential_evolution': Global optimization (slower but more robust)
+        fit_kr : bool
+            If True, fit both theta(p) and kr(p) curves
+            If False, only fit theta(p) (assumes kr follows Mualem model)
+        weight_theta : float
+            Relative weight for theta curve in objective function
+        weight_kr : float
+            Relative weight for kr curve in objective function
+        initial_guess : dict, optional
+            Initial parameter guesses: {'alpha': ..., 'n': ..., 'l_param': ...}
+            If None, uses heuristics based on curve data
+        verbose : bool
+            Print fitting progress and diagnostics
+        
+        Returns:
+        --------
+        vg_params : VanGenuchtenParams
+            Best-fit Van Genuchten parameters
+        diagnostics : dict
+            Fitting diagnostics (RMSE, R², residuals, etc.)
+        
+        Example:
+        --------
+        >>> till_model = CurveBasedHydraulicModel.from_library("till")
+        >>> vg_params, diag = till_model.fit_van_genuchten(verbose=True)
+        >>> print(f"Fitted alpha={vg_params.alpha:.2f}, n={vg_params.n:.2f}")
+        >>> print(f"RMSE(theta)={diag['rmse_theta']:.4f}, R²={diag['r2_theta']:.3f}")
+        >>> 
+        >>> # Use fitted parameters
+        >>> vg_model = VanGenuchtenModel(vg_params)
+        """
+        # ============================================
+        # STEP 1: Get reference data from curves
+        # ============================================
+        # Use curve data points
+        p_data = self.theta_curve.x_values
+        theta_data = self.theta_curve.y_values
+        
+        if fit_kr:
+            # Ensure kr curve has same pressure points (interpolate if needed)
+            kr_data = self._kr_interp(p_data)
+        else:
+            kr_data = None
+        
+        # Remove saturated points (p >= epsilon) for better fitting
+        mask = p_data < -self.epsilon
+        p_fit = p_data[mask]
+        theta_fit = theta_data[mask]
+        if fit_kr:
+            kr_fit = kr_data[mask]
+        
+        if len(p_fit) < 4:
+            raise ValueError("Need at least 4 data points in unsaturated zone for fitting")
+        
+        if verbose:
+            print(f"\n{'='*60}")
+            print(f"FITTING VAN GENUCHTEN PARAMETERS TO CURVES")
+            print(f"{'='*60}")
+            print(f"Data points: {len(p_fit)} (pressure range: [{p_fit.min():.2f}, {p_fit.max():.2f}] m)")
+            print(f"Target: theta_r={self._theta_r:.3f}, theta_s={self._theta_s:.3f}")
+        
+        # ============================================
+        # STEP 2: Set up optimization problem
+        # ============================================
+        
+        # Fixed parameters (from curve data)
+        theta_r = self._theta_r
+        theta_s = self._theta_s
+        
+        # Parameters to optimize: [alpha, n, l_param] (if fitting kr)
+        # Bounds based on physical constraints
+        if fit_kr:
+            bounds = [
+                (0.1, 50.0),    # alpha [1/m]: typically 0.5-15 for most soils
+                (1.1, 10.0),    # n [-]: must be > 1, typically 1.2-5
+                (0.0, 1.0)      # l_param [-]: pore connectivity, typically 0.5
+            ]
+            param_names = ['alpha', 'n', 'l_param']
+        else:
+            bounds = [
+                (0.1, 50.0),    # alpha [1/m]
+                (1.1, 10.0),    # n [-]
+            ]
+            param_names = ['alpha', 'n']
+        
+        # Initial guess (heuristic or user-provided)
+        if initial_guess is None:
+            # Heuristic initial guess based on pressure at theta = (theta_r + theta_s)/2
+            theta_mid = (theta_r + theta_s) / 2
+            idx_mid = np.argmin(np.abs(theta_fit - theta_mid))
+            p_mid = abs(p_fit[idx_mid])
+            
+            # From VG equation: at S_e = 0.5, p ≈ 1/(alpha * 2^(1/n))
+            # Rough estimate: alpha ≈ 1/(2 * p_mid)
+            alpha_guess = 1.0 / (2.0 * p_mid) if p_mid > 0 else 2.0
+            alpha_guess = np.clip(alpha_guess, 0.5, 15.0)
+            
+            # n typically 1.5-3 for most soils
+            n_guess = 2.0
+            
+            if fit_kr:
+                x0 = [alpha_guess, n_guess, 0.5]
+            else:
+                x0 = [alpha_guess, n_guess]
+        else:
+            x0 = [initial_guess.get(name, bounds[i][0]) 
+                  for i, name in enumerate(param_names)]
+        
+        if verbose:
+            print(f"Initial guess: {dict(zip(param_names, x0))}")
+            print(f"Method: {method}")
+        
+        # ============================================
+        # STEP 3: Define objective function
+        # ============================================
+        
+        def objective(params):
+            """
+            Objective function: weighted sum of squared errors
+            """
+            if fit_kr:
+                alpha, n, l_param = params
+            else:
+                alpha, n = params
+                l_param = 0.5  # Default Mualem value
+            
+            # Create temporary VG model
+            m = 1.0 - 1.0 / n
+            vg_params_temp = VanGenuchtenParams(
+                theta_r=theta_r,
+                theta_s=theta_s,
+                alpha=alpha,
+                n=n,
+                l_param=l_param,
+                m=m
+            )
+            vg_model_temp = VanGenuchtenModel(vg_params_temp, epsilon=self.epsilon)
+            
+            # Compute predictions
+            theta_pred = np.array([vg_model_temp._theta(p) for p in p_fit])
+            
+            # Theta error (normalized by range)
+            theta_range = theta_s - theta_r
+            theta_error = np.sum(((theta_pred - theta_fit) / theta_range)**2)
+            
+            # Kr error (if fitting)
+            kr_error = 0.0
+            if fit_kr:
+                kr_pred = np.array([vg_model_temp._kr(p) for p in p_fit])
+                kr_error = np.sum((kr_pred - kr_fit)**2)
+            
+            # Weighted total error
+            total_error = weight_theta * theta_error + weight_kr * kr_error
+            
+            return total_error
+        
+        # ============================================
+        # STEP 4: Optimize
+        # ============================================
+        
+        if method == 'differential_evolution':
+            # Global optimization (more robust, slower)
+            result = differential_evolution(
+                objective,
+                bounds=bounds,
+                maxiter=1000,
+                seed=42,
+                atol=1e-6,
+                tol=1e-6,
+                disp=verbose
+            )
+        else:  # 'minimize'
+            # Local optimization (faster, needs good initial guess)
+            result = minimize(
+                objective,
+                x0=x0,
+                method='L-BFGS-B',
+                bounds=bounds,
+                options={'maxiter': 1000, 'disp': verbose}
+            )
+        
+        if not result.success:
+            warnings.warn(f"Optimization did not converge: {result.message}")
+        
+        # ============================================
+        # STEP 5: Extract fitted parameters
+        # ============================================
+        
+        if fit_kr:
+            alpha_opt, n_opt, l_param_opt = result.x
+        else:
+            alpha_opt, n_opt = result.x
+            l_param_opt = 0.5
+        
+        m_opt = 1.0 - 1.0 / n_opt
+        
+        vg_params = VanGenuchtenParams(
+            theta_r=theta_r,
+            theta_s=theta_s,
+            alpha=alpha_opt,
+            n=n_opt,
+            l_param=l_param_opt,
+            m=m_opt
+        )
+        
+        # ============================================
+        # STEP 6: Compute diagnostics
+        # ============================================
+        
+        # Create VG model with fitted parameters
+        vg_model = VanGenuchtenModel(vg_params, epsilon=self.epsilon)
+        
+        # Predictions
+        theta_pred = np.array([vg_model._theta(p) for p in p_fit])
+        
+        # Theta diagnostics
+        theta_residuals = theta_pred - theta_fit
+        theta_rmse = np.sqrt(np.mean(theta_residuals**2))
+        theta_mae = np.mean(np.abs(theta_residuals))
+        
+        # R² (coefficient of determination)
+        ss_res = np.sum(theta_residuals**2)
+        ss_tot = np.sum((theta_fit - np.mean(theta_fit))**2)
+        theta_r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+        
+        diagnostics = {
+            'success': result.success,
+            'message': result.message,
+            'n_iterations': result.nit if hasattr(result, 'nit') else None,
+            'objective_value': result.fun,
+            'rmse_theta': theta_rmse,
+            'mae_theta': theta_mae,
+            'r2_theta': theta_r2,
+            'residuals_theta': theta_residuals,
+            'p_fit': p_fit,
+            'theta_fit': theta_fit,
+            'theta_pred': theta_pred,
+        }
+        
+        if fit_kr:
+            kr_pred = np.array([vg_model._kr(p) for p in p_fit])
+            kr_residuals = kr_pred - kr_fit
+            kr_rmse = np.sqrt(np.mean(kr_residuals**2))
+            kr_mae = np.mean(np.abs(kr_residuals))
+            
+            ss_res_kr = np.sum(kr_residuals**2)
+            ss_tot_kr = np.sum((kr_fit - np.mean(kr_fit))**2)
+            kr_r2 = 1.0 - (ss_res_kr / ss_tot_kr) if ss_tot_kr > 0 else 0.0
+            
+            diagnostics.update({
+                'rmse_kr': kr_rmse,
+                'mae_kr': kr_mae,
+                'r2_kr': kr_r2,
+                'residuals_kr': kr_residuals,
+                'kr_fit': kr_fit,
+                'kr_pred': kr_pred,
+            })
+        
+        # ============================================
+        # STEP 7: Print results
+        # ============================================
+        
+        if verbose:
+            print(f"\n{'='*60}")
+            print(f"FITTING RESULTS")
+            print(f"{'='*60}")
+            print(f"Converged: {result.success}")
+            print(f"\nFitted parameters:")
+            print(f"  alpha = {alpha_opt:.4f} [1/m]")
+            print(f"  n = {n_opt:.4f} [-]")
+            print(f"  m = {m_opt:.4f} [-]")
+            if fit_kr:
+                print(f"  l = {l_param_opt:.4f} [-]")
+            
+            print(f"\nGoodness of fit (theta):")
+            print(f"  RMSE = {theta_rmse:.5f} [m³/m³]")
+            print(f"  MAE  = {theta_mae:.5f} [m³/m³]")
+            print(f"  R²   = {theta_r2:.4f}")
+            
+            if fit_kr:
+                print(f"\nGoodness of fit (kr):")
+                print(f"  RMSE = {kr_rmse:.5f} [-]")
+                print(f"  MAE  = {kr_mae:.5f} [-]")
+                print(f"  R²   = {kr_r2:.4f}")
+            
+            # Interpretation
+            print(f"\nInterpretation:")
+            if theta_r2 > 0.95:
+                print("  ✓ Excellent fit! VG model represents data very well")
+            elif theta_r2 > 0.90:
+                print("  ✓ Good fit. VG model is suitable")
+            elif theta_r2 > 0.80:
+                print("  ⚠ Acceptable fit, but some discrepancies")
+            else:
+                print("  ✗ Poor fit. VG model may not be appropriate for this soil")
+            
+            print(f"{'='*60}\n")
+        
+        return vg_params, diagnostics
+    
+    def compare_with_van_genuchten(self, vg_params: VanGenuchtenParams, 
+                                   n_points: int = 50) -> Dict:
+        """
+        Visual comparison between curve data and Van Genuchten model
+        
+        Parameters:
+        -----------
+        vg_params : VanGenuchtenParams
+            VG parameters to compare against
+        n_points : int
+            Number of points for comparison
+        
+        Returns:
+        --------
+        comparison : dict
+            Contains pressure, theta, and kr arrays for both models
+        
+        Example:
+        --------
+        >>> vg_params, _ = till_model.fit_van_genuchten()
+        >>> comp = till_model.compare_with_van_genuchten(vg_params)
+        >>> 
+        >>> # Plot comparison
+        >>> import matplotlib.pyplot as plt
+        >>> plt.plot(comp['p'], comp['theta_curve'], 'o', label='Curve data')
+        >>> plt.plot(comp['p'], comp['theta_vg'], '-', label='Van Genuchten')
+        >>> plt.legend()
+        >>> plt.show()
+        """
+        # Pressure range
+        p_min = self.theta_curve.x_min
+        p_max = min(self.theta_curve.x_max, -self.epsilon)  # Stay in unsaturated zone
+        p_range = np.linspace(p_min, p_max, n_points)
+        
+        # Curve model predictions
+        theta_curve = np.array([self._theta(p) for p in p_range])
+        kr_curve = np.array([self._kr(p) for p in p_range])
+        
+        # VG model predictions
+        vg_model = VanGenuchtenModel(vg_params, epsilon=self.epsilon)
+        theta_vg = np.array([vg_model._theta(p) for p in p_range])
+        kr_vg = np.array([vg_model._kr(p) for p in p_range])
+        
+        return {
+            'p': p_range,
+            'theta_curve': theta_curve,
+            'theta_vg': theta_vg,
+            'kr_curve': kr_curve,
+            'kr_vg': kr_vg,
+            'theta_diff': theta_vg - theta_curve,
+            'kr_diff': kr_vg - kr_curve,
+        }

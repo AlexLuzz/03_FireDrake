@@ -41,7 +41,7 @@ class Material:
         else:
             contaminant_map = {
                 'chloride': ContaminantProperties.chloride,
-                'chloride test': ContaminantProperties.chloride_test,
+                'chloride_test': ContaminantProperties.chloride_test,
                 'sodium': ContaminantProperties.sodium,
                 'calcium': ContaminantProperties.calcium,
             }
@@ -120,7 +120,7 @@ class Material:
         """
         return cls._from_vg(
             SoilParameters.till,
-            {'theta_r': 0.08, 'theta_s': 0.41, 'alpha': 3.6, 'n': 1.56},
+            {'theta_r': 0.02, 'theta_s': 0.14, 'alpha': 0.9399, 'n': 2.3579},
             contaminant, **kwargs
         )
     
@@ -129,7 +129,7 @@ class Material:
         """Terreau material with Van Genuchten model"""
         return cls._from_vg(
             SoilParameters.terreau,
-            {'theta_r': 0.08, 'theta_s': 0.41, 'alpha': 3.6, 'n': 1.56},
+            {'theta_r': 0.02, 'theta_s': 0.43, 'alpha': 1.1670, 'n': 2.1052},
             contaminant, **kwargs
         )
     

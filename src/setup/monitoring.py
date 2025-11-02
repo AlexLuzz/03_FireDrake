@@ -2,6 +2,7 @@
 Generic monitoring for time series and spatial snapshots
 """
 import numpy as np
+from firedrake import Function
 
 class ProbeManager:
     """
@@ -29,6 +30,8 @@ class ProbeManager:
         
         # Data storage: {probe_name: {field_name: [values]}}
         self.data = {name: {} for name in self.names}
+        # Global (non-probe) time series storage: {series_name: [values]}
+        self.global_data = {}
         self.times = []
         
         # Tolerance for finding nodes (1% of domain width)
@@ -49,8 +52,8 @@ class ProbeManager:
             idx = np.argmin(distances)
             indices.append(idx)
         return indices
-    
-    def record(self, t: float, field, field_name: str = "value"):
+
+    def record(self, t: float, field: Function = None, field_name: str = "value", data: float = None):
         """
         Record field values at all probe locations (GENERIC)
         
@@ -66,14 +69,24 @@ class ProbeManager:
         # Add time if this is a new timestep
         if not self.times or self.times[-1] != t:
             self.times.append(t)
-        
-        # Extract values at probe locations
-        field_data = field.dat.data_ro
-        
-        for name, idx in zip(self.names, self._probe_node_indices):
-            if field_name not in self.data[name]:
-                self.data[name][field_name] = []
-            self.data[name][field_name].append(float(field_data[idx]))
+
+        # Case 1: Firedrake Function provided -> sample at probe nodes
+        if isinstance(field, Function):
+            field_data = field.dat.data_ro
+            for name, idx in zip(self.names, self._probe_node_indices):
+                if field_name not in self.data[name]:
+                    self.data[name][field_name] = []
+                self.data[name][field_name].append(float(field_data[idx]))
+            return
+        # Case 2: Generic scalar/array provided (global time series)
+        if data is None and field is not None:
+            # Support positional use: record(t, value, "series_name")
+            data = field
+        if data is not None:
+            if field_name not in self.global_data:
+                self.global_data[field_name] = []
+            self.global_data[field_name].append(float(data))
+            return
     
     def record_water_table(self, t: float, pressure_field):
         """
@@ -133,7 +146,7 @@ class ProbeManager:
     
     def get_data(self):
         """Get all recorded data"""
-        return {'times': np.array(self.times), 'data': self.data}
+        return {'times': np.array(self.times), 'data': self.data, 'global': self.global_data}
     
     def save_to_csv(self, filename: str):
         """Save all data to CSV"""
@@ -148,6 +161,9 @@ class ProbeManager:
             for name in self.names:
                 for field_name in self.data[name].keys():
                     header.append(f'{name}_{field_name}')
+            # Include global series
+            for field_name in self.global_data.keys():
+                header.append(f'global_{field_name}')
             writer.writerow(header)
             
             # Write data
@@ -156,6 +172,8 @@ class ProbeManager:
                 for name in self.names:
                     for field_name in self.data[name].keys():
                         row.append(self.data[name][field_name][i])
+                for field_name in self.global_data.keys():
+                    row.append(self.global_data[field_name][i] if i < len(self.global_data[field_name]) else '')
                 writer.writerow(row)
         
         print(f"✓ Probe data saved to {filename}")

@@ -3,18 +3,12 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [ ] D0 problem OR just values too low and mass loss 
-        (i.e. need for fancy darcy post-processing and DG ?)
-    - [x-ish] Save pdf instead of png, with all parameters
-    - [ ] Add processing duration in config and add it to the report
-    - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
-
-    
-    ## Medium Priority ⚡
-    - [ ] Improve functionSpace and boundary conditions declaration logic
-    - [ ] Import curves from txt/csv
-    - [ ] Hybrid display on results, plot water table / rain mm / salt flux (maybe just tweak the source_term plot)
     - [ ] Implement test script with ANALYTICAL solution for validation
+    - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
+    - [ ] adaptative timestep
+
+    ## Medium Priority ⚡
+    - [ ] Hybrid display on results, plot water table / rain mm / salt flux (maybe just tweak the source_term plot)
 
     ## Side-side project that will never see the light
     - [ ] Use pyTorch and code a optimization loop to auto-fit parameters ! (probably doable for richard's)
@@ -22,11 +16,16 @@
     - [ ] Track processing time to evaluate what takes time, and ...
 
     ## ULTRA Low Priority 💡
+    - [ ] Improve functionSpace and boundary conditions declaration logic
     - [ ] Code cleanup
     - [ ] Documentation
-
+    - [ ] Import curves from txt/csv
 
 ## ✅ Completed
+- [x] Fit RAF curves to use fast vg params instead
+- [x] D0 problem OR just values too low and mass loss - seems to be working !
+- [x] Add processing duration in config and add it to the report
+- [x] Save pdf instead of png, with all parameters
 - [x] Improve from_library logic, overal material params, maybe centralize the library - MAKE IT READABLE
 - [x] Improve plotters logic, it sucks
 - [x] Major update of physics/field_maping interaction

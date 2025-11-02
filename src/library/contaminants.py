@@ -28,7 +28,7 @@ class ContaminantProperties:
     def chloride_test(cls, alpha_L: float = 1):
         """Cl⁻ - conservative tracer"""
         return cls(name="Chloride test", 
-                   Dd=2.03e-7,      # Higher diffusion for testing (faster spreading)
+                   Dd=2.03e-9,      # Higher diffusion for testing (faster spreading)
                    Kd=0.0,          # Conservative, no sorption
                    lambda_=0.0,     # Non-reactive, no degradation
                    alpha_L=alpha_L)
