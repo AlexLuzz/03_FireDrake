@@ -19,9 +19,8 @@ from datetime import datetime, timedelta
 def your_simulation(params: dict) -> np.ndarray:
     """
     Wrapper for your Richards equation simulation
-    
     This is where you integrate with your existing code:
-    - Extract soil parameters and rain multipliers from params dict
+    - Extract soil parameters (and rain multipliers) from params dict
     - Run your RichardsSolver with these parameters
     - Return simulated values at observation points and times
     
@@ -36,25 +35,25 @@ def your_simulation(params: dict) -> np.ndarray:
     """
     config = SimulationConfig(
         name="Datetime_Duration",
-        start_datetime=datetime(2024, 4, 15),
-        end_datetime=datetime(2024, 4, 30),
+        start_datetime=generic_param['start_datetime'],
+        end_datetime=generic_param['end_datetime'],
         dt_td=timedelta(hours=6)
     )
     
     rain_zones = [
-        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 'multiplier': 1.0},
-        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': 6.0},
+        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 'multiplier':params['rain_mult_0']},
+        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': params['rain_mult_1']},
     ]
     
     rain_source = rainfall_scenario(
         from_date=config.start_datetime,
         to_date=config.end_datetime,
         # From CSV file (need to specify path and rain unit)
-        csv_path=config.data_input_dir / "BB_METEO.csv",
-        rain_unit="mm/day",
+        #csv_path=config.data_input_dir / "BB_METEO.csv",
+        #rain_unit="mm/day",
         # From Meteostat (uncomment to use)
-        #meteostat_station='SOK6B',
-        #meteostat_agg_hours=6,
+        meteostat_station='SOK6B',
+        meteostat_agg_hours=6,
         zones=rain_zones
     )
 
@@ -75,13 +74,16 @@ def your_simulation(params: dict) -> np.ndarray:
     V = FunctionSpace(domain.mesh, "CG", 1)
     field_map = MaterialField(domain, V)
 
-    bc_manager = BoundaryConditionManager(
-        V,
-        left_wt=1.2,
-        right_wt=1.2
-    )
+    bc_manager = BoundaryConditionManager(V, params['wt_left'], params['wt_right'],
+                                    left_trend=(generic_param['end_datetime'], 
+                                                params['wt_left']-params['wt_trend']),
+                                    right_trend=(generic_param['end_datetime'], 
+                                                 params['wt_right']-params['wt_trend']),
+                                    time_converter=config.time_converter)
 
-    probe_manager = ProbeManager(domain.mesh)
+    probe_manager = ProbeManager(domain.mesh,
+                                 probe_positions = [[8.0, 1.0], [10.0, 1.0], [12.5, 1.0]]
+    )
 
     solver = RichardsSolver(
         domain=domain,
@@ -110,19 +112,17 @@ def your_simulation(params: dict) -> np.ndarray:
 # STEP 2: Set up observations, parameters, and bounds
 # ==============================================================================
 
-def main():
+def main(generic_param):
     """Run parameter optimization"""
-    
-    print("="*70)
-    print("PARAMETER OPTIMIZATION EXAMPLE")
-    print("="*70)
 
-    LTC_data = load_measured_data(start_datetime=datetime(2024, 4, 15),
-                                  end_datetime=datetime(2024, 4, 30),
-                                  time_converter=TimeConverter(datetime(2024, 4, 15)), align=True)
+    LTC_data = load_measured_data(start_datetime=generic_param['start_datetime'],
+                                  end_datetime=generic_param['end_datetime']+timedelta(hours=6),
+                                  time_converter=TimeConverter(generic_param['start_datetime']),
+                                  align=True,
+                                  align_freq=generic_param['timestep_hours'])
 
     observations = ObservationData(
-        times=None,
+        times=LTC_data['times'],  # days to hours
         locations=[[8.0, 1.0], [10.0, 1.0], [12.5, 1.0]],
         values=np.array([LTC_data['LTC 101'], LTC_data['LTC 102'], LTC_data['LTC 103']]).T
     )
@@ -138,21 +138,20 @@ def main():
         'n': 2.3579,
         'Ks': 9e-6,
         # Rain multipliers (if optimizing these)
-        #'rain_mult_0': 1.2,
-        #'rain_mult_1': 5.5,
+        'rain_mult_0': 1.0,
+        'rain_mult_1': 6.0,
+        # Water table initial condition (if optimizing)
+        'wt_left': 0.6,
+        'wt_right': 1.5,
+        'wt_trend': 0.25 # linear trend over simulation period
     }
-    
-    true_params = base_params.copy()  # For testing with synthetic data
-
-    print("\n2. Creating parameter bounds (±20%)...")
-    
+        
     # Create tight bounds
     initial_params, bounds = create_tight_bounds(
         base_params,
         variation_pct=20.0,  # ±20%
-        min_constraints={'n': 1.05}  # n must be > 1
     )
-    
+    """
     # Cost estimate
     print("\n3. Estimating computational cost...")
     estimate_computational_cost(
@@ -161,13 +160,11 @@ def main():
         simulation_time_sec=60.0,  # Adjust to your simulation time!
         method='both'
     )
-    
+    """
     # ==============================================================================
     # STEP 3: Run optimization
     # ==============================================================================
-    
-    print("\n4. Creating optimizer...")
-    
+        
     optimizer = ParameterOptimizer(
         forward_model=your_simulation,
         observations=observations,
@@ -177,15 +174,15 @@ def main():
     
     # Optional: Check parameter correlations first
     print("\n5. Checking parameter correlations...")
-    correlation = compute_parameter_correlation(optimizer, n_samples=20, plot=True)
+    #correlation = compute_parameter_correlation(optimizer, n_samples=20, plot=True)
     
     # Run optimization
     print("\n6. Running optimization...")
     best_params = optimizer.optimize(
-        n_iterations=20,
-        learning_rate=0.03,  # Lower for tight bounds
+        n_iterations=2,
+        learning_rate=0.2,  # Lower for tight bounds
         optimizer_type='adam',
-        use_finite_diff=True,
+        use_finite_diff=False,
         verbose=True
     )
     
@@ -197,24 +194,28 @@ def main():
     print_parameter_comparison(
         optimized=best_params,
         initial=initial_params,
-        true=true_params  # Remove this for real data
+        #true=true_params  # Remove this for real data
     )
     
+    save_path = f'optimized_parameters_{datetime.now().strftime("%m%d_%H%M")}.png'
+
     # Plot results
-    print("\n8. Generating plots...")
     plot_optimization_results(
         optimizer,
-        true_params=true_params,  # Remove this for real data
-        save_path='optimization_results.png'
+        #true_params=true_params,  # Remove this for real data
+        save_path=save_path
     )
-    
-    print("\n✅ Optimization complete!")
-    print("   Results saved to: optimization_results.png")
-    
+    print(f"   Results saved to: {save_path}")
+
     return best_params, optimizer
 
 
 if __name__ == "__main__":
     # Run main example
-    best_params, optimizer = main()
-    
+    generic_param = {
+        'start_datetime': datetime(2024, 4, 15),
+        'end_datetime': datetime(2024, 6, 30),
+        'timestep_hours': 6,
+    }
+
+    best_params, optimizer = main(generic_param)

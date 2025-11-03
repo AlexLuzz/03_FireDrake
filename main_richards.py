@@ -11,7 +11,7 @@ def main():
     config = SimulationConfig(
         name="Datetime_Duration",
         start_datetime=datetime(2024, 4, 15),
-        end_datetime=datetime(2024, 5, 15),
+        end_datetime=datetime(2024, 6, 1),
         dt_td=timedelta(hours=6)
     )
     
@@ -27,11 +27,11 @@ def main():
         from_date=config.start_datetime,
         to_date=config.end_datetime,
         # From CSV file (need to specify path and rain unit)
-        csv_path=config.data_input_dir / "BB_METEO.csv",
-        rain_unit="mm/day",
+        #csv_path=config.data_input_dir / "BB_METEO.csv",
+        #rain_unit="mm/day",
         # From Meteostat (uncomment to use)
-        #meteostat_station='SOK6B',
-        #meteostat_agg_hours=6,
+        meteostat_station='SOK6B',
+        meteostat_agg_hours=6,
         zones=rain_zones
     )
 
@@ -45,9 +45,9 @@ def main():
     # ==========================================
     # 4. MATERIALS (properties)
     # ==========================================
-
-    domain.assign("base", Material.till_curve_RAF())
-    domain.assign("GI", Material.terreau_curve_RAF())
+    from firedrake import Constant
+    domain.assign("base", Material.till())
+    domain.assign("GI", Material.terreau())
 
     # ==========================================
     # 5. MAPPING (connect materials to domain)
@@ -58,12 +58,11 @@ def main():
     # ==========================================
     # 7. BOUNDARY CONDITIONS
     # ==========================================
-    bc_manager = BoundaryConditionManager(
-        V,
-        left_wt=1.2,
-        right_wt=1.2
-    )
-    
+    bc_manager = BoundaryConditionManager(V, left_wt=0.6, right_wt=1.5,
+                                    left_trend=(config.end_datetime, 0.5),
+                                    right_trend=(config.end_datetime, 1.1),
+                                    time_converter=config.time_converter)
+
     # ==========================================
     # 8. MONITORING
     # ==========================================

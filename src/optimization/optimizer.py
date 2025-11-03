@@ -8,7 +8,8 @@ import torch
 import numpy as np
 from typing import Dict, Tuple, List, Callable, Optional
 from dataclasses import dataclass
-
+from firedrake.adjoint import *
+from pyadjoint import get_working_tape, Control, ReducedFunctional
 
 @dataclass
 class ObservationData:
@@ -105,8 +106,11 @@ class ParameterOptimizer:
     
     def compute_loss(self, simulated: np.ndarray) -> float:
         """Weighted mean squared error"""
-        residuals = (simulated - self.observations.values) * self.observations.weights
-        return np.sum(residuals ** 2) / np.sum(self.observations.weights)
+
+        # Cut off the first 20% of the data (to avoid initial transient effects)
+        cutoff = int(0.2 * len(simulated))
+        residuals = (simulated[cutoff:] - self.observations.values[cutoff:]) * self.observations.weights[cutoff:]
+        return np.sum(residuals ** 2) / np.sum(self.observations.weights[cutoff:])
     
     def compute_gradient_fd(self, params: Dict[str, float], epsilon: float = 1e-5) -> np.ndarray:
         """Compute gradient using finite differences"""
@@ -199,9 +203,9 @@ class ParameterOptimizer:
             # Check convergence
             if len(self.loss_history) > 1:
                 rel_change = abs(self.loss_history[-1] - self.loss_history[-2]) / (self.loss_history[-2] + 1e-10)
-                if rel_change < 1e-6:
+                if bool(rel_change < 1e-2):  # Explicitly convert to Python bool
                     if verbose:
-                        print(f"\nConverged after {iteration + 1} iterations")
+                        print(f"\nConverged after {iteration + 1} iterations (rel_change={rel_change:.6e})")
                     break
         
         # Return best parameters

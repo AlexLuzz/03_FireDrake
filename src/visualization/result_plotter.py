@@ -36,14 +36,19 @@ class ResultsPlotter(BasicPlotting):
         field_config = self.field_configs[field_name]
         result = {'times': probe_data['times']}
         
-        for probe_name, probe_fields in probe_data['data'].items():
+        # Get probe names in sorted order to ensure consistent numbering
+        probe_names = sorted(probe_data['data'].keys())
+        
+        for i, probe_name in enumerate(probe_names):
+            probe_fields = probe_data['data'][probe_name]
             if field_config.data_key in probe_fields:
                 data = np.array(probe_fields[field_config.data_key])
                 if field_config.transform_func:
                     data = field_config.transform_func(data)
                 
-                clean_name = probe_name.split('(')[0].strip()
-                result[clean_name] = data
+                # Use consistent LTC naming to match COMSOL/Measured data
+                standardized_name = f"LTC {i+1}"
+                result[standardized_name] = data
         
         return result
     
@@ -89,29 +94,47 @@ class ResultsPlotter(BasicPlotting):
             n_rows += 2
         
         fig = plt.figure(figsize=(20, 4 * n_rows))
-        gs = GridSpec(n_rows, 3, figure=fig, hspace=0.25, wspace=0.35)
+        gs = GridSpec(n_rows, 3, figure=fig, hspace=0.3, wspace=0.35)
         
         title = 'Richards Equation Simulation Results'
         if use_datetime and self.config.start_datetime:
             title += f'\n{self.config.start_datetime.strftime("%Y-%m-%d")}'
-        fig.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
+        fig.suptitle(title, fontsize=14, fontweight='bold', y=0.975)
         
+        # Collect all time axes for alignment
+        time_axes = []
+        
+        # Determine x-axis limits for alignment
+        times_sim = probe_data['times']
+        if use_datetime:
+            x_min = self.config.time_converter.to_datetime(times_sim[0])
+            x_max = self.config.time_converter.to_datetime(times_sim[-1])
+        else:
+            x_min = times_sim[0] / 3600.0
+            x_max = times_sim[-1] / 3600.0
+
         row = 0
         for field_name in config['time_series_fields']:
             ax = fig.add_subplot(gs[row, :])
+            time_axes.append(ax)
             self._plot_timeseries_panel(ax, probe_data, field_name,
                                        comsol_data, measured_data, use_datetime)
             self.format_time_axis(ax, use_datetime, show_xlabel=(row == n_rows - (2 if snapshots else 0) - 1))
             row += 1
-        
+
         for comparison_name, comparison_data in [('COMSOL', comsol_data), ('Measured', measured_data)]:
             if comparison_data:
                 for field_name in config['time_series_fields']:
                     ax = fig.add_subplot(gs[row, :])
+                    time_axes.append(ax)
                     self._plot_residuals_panel(ax, probe_data, comparison_data,
                                               field_name, comparison_name, use_datetime)
                     self.format_time_axis(ax, use_datetime, show_xlabel=(row == n_rows - (2 if snapshots else 0) - 1))
                     row += 1
+        
+        # Align all time-based x-axes
+        for ax in time_axes:
+            ax.set_xlim(x_min, x_max)
         
         if snapshots:
             self._plot_snapshots_grid(fig, gs, snapshots, config['snapshot_fields'],
@@ -131,18 +154,30 @@ class ResultsPlotter(BasicPlotting):
                                comsol_data, measured_data, use_datetime):
         field_config = self.field_configs[field_name]
         
+        # Define consistent color mapping that can handle any number of probes
+        base_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        
         times_sim = probe_data['times']
         if use_datetime:
             times_plot = [self.config.time_converter.to_datetime(t) for t in times_sim]
         else:
             times_plot = times_sim / 3600.0
-        
+
         sim_data = self._extract_probe_timeseries(probe_data, field_name)
         sim_data['times'] = times_plot
-        self.plot_timeseries(ax, times_plot, sim_data, field_config,
-                            self.timeseries_styles['simulation'], label_suffix=' - Firedrake')
         
-        base_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        # For Firedrake data, use consistent colors based on LTC number order
+        # Create color mapping that matches LTC numbers exactly
+        ltc_names = sorted([k for k in sim_data.keys() if k.startswith('LTC')])
+        
+        # Create a color map that assigns colors based on LTC number
+        color_map = {}
+        for i, ltc_name in enumerate(ltc_names):
+            color_map[ltc_name] = base_colors[i % len(base_colors)]
+        
+        self.plot_timeseries(ax, times_plot, sim_data, field_config,
+                            self.timeseries_styles['simulation'], color_map=color_map,
+                            label_suffix=' - Firedrake')
         
         for comp_name, comp_data, comp_style in [
             ('COMSOL', comsol_data, 'comsol'),
@@ -156,21 +191,23 @@ class ResultsPlotter(BasicPlotting):
                 comp_dict = {f'LTC {i+1}': comp_data[f'LTC {100+i+1}']
                             for i in range(3) if f'LTC {100+i+1}' in comp_data}
                 
+                # Use same color cycle for comparison data, matching probe indices
                 n_comp = len(comp_dict)
                 comp_colors = [base_colors[i % len(base_colors)] for i in range(n_comp)]
                 self.plot_timeseries(ax, times_comp, comp_dict, field_config,
                                     self.timeseries_styles[comp_style], colors=comp_colors,
                                     label_suffix=f' - {comp_name}')
-        
+
         if self.rain_scenario:
             self.add_rain_bars(ax, self.rain_scenario.events, use_datetime)
         
         if len(times_plot) > 0:
             ax.set_xlim(times_plot[0], times_plot[-1])
-    
+
     def _plot_residuals_panel(self, ax, probe_data, ref_data, field_name, ref_name, use_datetime):
         field_config = self.field_configs[field_name]
-        colors = ['#1f77b4', '#2ca02c', '#d62728']
+        # Use same consistent color cycle as in time series
+        base_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
         
         times_sim = probe_data['times']
         times_ref = ref_data['times'] * 86400
@@ -180,21 +217,30 @@ class ResultsPlotter(BasicPlotting):
         else:
             times_ref_plot = times_ref / 3600.0
         
-        for i, (ltc_name, probe_name) in enumerate(zip(['LTC 101', 'LTC 102', 'LTC 103'],
-                                                        list(probe_data['data'].keys())[:3])):
+        # Get probe names in sorted order to ensure consistent numbering
+        probe_names = sorted(probe_data['data'].keys())
+        
+        for i, probe_name in enumerate(probe_names):
+            ltc_name = f'LTC {100+i+1}'  # LTC 101, 102, 103...
+            
             if ltc_name in ref_data:
                 sim_data = np.array(probe_data['data'][probe_name][field_config.data_key])
                 ref_vals = ref_data[ltc_name]
                 
                 _, residuals = self.compute_residuals(times_sim, sim_data, times_ref, ref_vals)
                 
-                ax.plot(times_ref_plot, residuals, color=colors[i], linewidth=2.5,
-                       marker='o', markersize=3, markevery=max(1, len(times_ref)//30))
+                # Use consistent colors and add probe labels to legend
+                probe_label = f'LTC {i+1}'  # Standardized label
+                color = base_colors[i % len(base_colors)]
+                ax.plot(times_ref_plot, residuals, color=color, linewidth=2.5,
+                       marker='o', markersize=3, markevery=max(1, len(times_ref)//30),
+                       label=probe_label)
         
         ax.axhline(0, color='black', linestyle='-', linewidth=1.5, alpha=0.5)
         ax.set_ylabel(f'Residual ({field_config.units})\n[{ref_name} - Firedrake]',
                      fontsize=11, fontweight='bold')
         ax.grid(True, alpha=0.3)
+        ax.legend(loc='upper right', fontsize=9)  # Add legend to show which line is which probe
 
     # -----------------------------
     # Simple generic timeseries plotter for report pages
@@ -265,10 +311,12 @@ class ResultsPlotter(BasicPlotting):
                     ax.set_xlim(0, self.domain.Lx)
                     ax.set_ylim(0, self.domain.Ly)
             
-            cbar_ax = fig.add_axes([0.92, 0.25, 0.02, 0.35])
+            # Position colorbar lower and make it smaller
+            # Adjust position based on the figure layout: [left, bottom, width, height]
+            cbar_ax = fig.add_axes([0.92, 0.15, 0.015, 0.25])
             cbar = fig.colorbar(cf, cax=cbar_ax)
             cbar.set_label(f'{field_config.label} ({field_config.units})',
-                          fontsize=12, fontweight='bold')
+                          fontsize=11, fontweight='bold')
 
             # For log-scale fields, prefer linearly spaced tick values over decades
             if getattr(field_config, 'use_log_scale', False) and cf.norm is not None:

@@ -15,11 +15,12 @@ class BasicPlotting:
                        field_config: FieldConfig,
                        style: TimeSeriesStyle = None,
                        colors: List[str] = None,
+                       color_map: Dict[str, str] = None,
                        label_suffix: str = ''):
         if style is None:
             style = TimeSeriesStyle()
         
-        if colors is None:
+        if colors is None and color_map is None:
             base_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
             n_series = len([k for k in data_dict.keys() if k != 'times'])
             colors = [base_colors[i % len(base_colors)] for i in range(n_series)]
@@ -30,9 +31,15 @@ class BasicPlotting:
             if name == 'times':
                 continue
             
+            # Use color_map if provided, otherwise use colors list
+            if color_map is not None:
+                color = color_map.get(name, plt.rcParams['axes.prop_cycle'].by_key()['color'][i % len(plt.rcParams['axes.prop_cycle'].by_key()['color'])])
+            else:
+                color = colors[i % len(colors)]
+            
             label = f'{name}{label_suffix}' if label_suffix else name
             ax.plot(times, data,
-                    color=colors[i % len(colors)],
+                    color=color,
                     linewidth=style.linewidth,
                     linestyle=style.linestyle,
                     marker=style.marker,

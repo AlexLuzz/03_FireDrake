@@ -9,7 +9,6 @@ import matplotlib.dates as mdates
 from pathlib import Path
 from typing import Dict, Optional, Union
 from datetime import datetime
-from scipy.interpolate import interp1d
 from .csv_loader import CSVLoader
 from .time_converter import TimeConverter
 
@@ -17,10 +16,11 @@ from .time_converter import TimeConverter
 DEFAULT_COMSOL_FILE = Path("./data_input/RAF_COMSOL_PZ_CG.csv")
 DEFAULT_MEASURED_FILE = Path("./data_input/MEASURED_PZ_CG.csv")
 DEFAULT_COMSOL_REF_DATE = datetime(2024, 2, 22)  # COMSOL t=0 reference date
+
 DEFAULT_MEASURED_OFFSETS = {
-    'LTC 101': 0.60,
-    'LTC 102': 0.70, 
-    'LTC 103': 0.35,
+    'LTC 101': 0.0,
+    'LTC 102': 0.0, 
+    'LTC 103': 0.0,
 }
 
 

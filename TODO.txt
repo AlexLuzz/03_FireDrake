@@ -3,17 +3,18 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
+    - [ ] Use pyTorch and code a optimization loop to auto-fit parameters ! (probably doable for richard's) 
     - [ ] Implement test script with ANALYTICAL solution for validation
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
     - [ ] adaptative timestep
     - [ ] Check ponding problem
 
     ## Medium Priority ⚡
+    - [ ] Evaluate real OFFSET for CG LTC probes
     - [ ] Hybrid display on results, plot water table / rain mm / salt flux
     - [ ] Test SUPG and/or crank nicholson for transport ? 
 
     ## Side-side project that will never see the light
-    - [ ] Use pyTorch and code a optimization loop to auto-fit parameters ! (probably doable for richard's)
     - [ ] TRY some uncertainty evaluation with bayesian simulation using PYRO ????
     - [ ] Track processing time to evaluate what takes time, and ...
 
