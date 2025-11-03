@@ -6,9 +6,11 @@
     - [ ] Implement test script with ANALYTICAL solution for validation
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
     - [ ] adaptative timestep
+    - [ ] Check ponding problem
 
     ## Medium Priority ⚡
-    - [ ] Hybrid display on results, plot water table / rain mm / salt flux (maybe just tweak the source_term plot)
+    - [ ] Hybrid display on results, plot water table / rain mm / salt flux
+    - [ ] Test SUPG and/or crank nicholson for transport ? 
 
     ## Side-side project that will never see the light
     - [ ] Use pyTorch and code a optimization loop to auto-fit parameters ! (probably doable for richard's)

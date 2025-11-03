@@ -15,10 +15,9 @@ class TimeConverter:
         t_sec = converter.to_seconds(datetime(2024, 6, 3, 12, 0))  # 2.5 days
         dt = converter.to_datetime(216000)  # back to datetime
     """
-    
-    def __init__(self, start_datetime: datetime):
-        self.start = start_datetime
-    
+    def __init__(self, start: datetime = None):
+        """Initialize with simulation start datetime (default: epoch)"""
+        self.start = start or datetime(2024, 2, 22)
     def to_seconds(self, dt: Union[datetime, pd.Timestamp, np.datetime64]) -> float:
         """Convert datetime to seconds from simulation start"""
         if isinstance(dt, pd.Timestamp):

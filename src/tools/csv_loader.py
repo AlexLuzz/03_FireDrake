@@ -2,6 +2,7 @@
 Dead simple CSV loader with datetime handling
 """
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from typing import Optional, List, Literal
 
@@ -123,6 +124,40 @@ class CSVLoader:
         else:
             raise ValueError(f"Unknown method: {method}")
         
+        return self
+    
+    def hampel_filter(self, col: str, window_size: int = 5, n_sigma: float = 3.0):
+        """
+        Remove outliers using Hampel filter (median absolute deviation)
+        
+        Args:
+            col: Column name to filter
+            window_size: Moving window size (must be odd)
+            n_sigma: Threshold in standard deviations
+        
+        Returns:
+            self for method chaining
+        """
+        if col not in self.df.columns:
+            raise ValueError(f"Column '{col}' not found")
+        
+        # Get numeric data
+        values = self.get_numeric(col)
+        filtered = values.copy()
+        half_window = window_size // 2
+        
+        for i in range(half_window, len(values) - half_window):
+            window = values[i - half_window : i + half_window + 1]
+            median = np.median(window)
+            mad = np.median(np.abs(window - median))
+            
+            if mad > 0:  # Avoid division by zero
+                threshold = n_sigma * 1.4826 * mad  # 1.4826 converts MAD to std
+                if np.abs(values[i] - median) > threshold:
+                    filtered[i] = median
+        
+        # Update the dataframe
+        self.df[col] = filtered
         return self
     
     def get_numeric(self, col: str):

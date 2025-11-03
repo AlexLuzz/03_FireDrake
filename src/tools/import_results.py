@@ -24,31 +24,6 @@ DEFAULT_MEASURED_OFFSETS = {
 }
 
 
-def hampel_filter(data: np.ndarray, window_size: int = 5, n_sigma: float = 3.0) -> np.ndarray:
-    """
-    Remove outliers using Hampel filter (median absolute deviation)
-    
-    Args:
-        data: Input array
-        window_size: Moving window size (must be odd)
-        n_sigma: Threshold in standard deviations
-    """
-    filtered = data.copy()
-    half_window = window_size // 2
-    
-    for i in range(half_window, len(data) - half_window):
-        window = data[i - half_window : i + half_window + 1]
-        median = np.median(window)
-        mad = np.median(np.abs(window - median))
-        
-        if mad > 0:  # Avoid division by zero
-            threshold = n_sigma * 1.4826 * mad  # 1.4826 converts MAD to std
-            if np.abs(data[i] - median) > threshold:
-                filtered[i] = median
-    
-    return filtered
-
-
 def load_comsol_data(csv_path: Union[str, Path] = None, 
                      start_from_days: float = 0.0, 
                      sim_duration_days: Optional[float] = None) -> Dict:
@@ -86,7 +61,9 @@ def load_measured_data(csv_path: Union[str, Path] = None,
                       end_datetime: Optional[datetime] = None,
                       offsets: Optional[Dict[str, float]] = None,
                       smooth_window: int = 6,
-                      hampel_window: int = 120) -> Dict:
+                      hampel_window: int = 120,
+                      align: bool = False,
+                      align_freq: int = 6) -> Dict:
     """Load field measurement data with filtering and smoothing"""
     csv_path = csv_path or DEFAULT_MEASURED_FILE
     offsets = offsets or DEFAULT_MEASURED_OFFSETS
@@ -101,16 +78,9 @@ def load_measured_data(csv_path: Union[str, Path] = None,
     if start_datetime or end_datetime:
         loader.filter_dates(start_datetime, end_datetime)
     
-    # Convert times
-    datetimes = loader.get_datetimes()
-    sim_times = np.array([time_converter.to_seconds(dt) / 86400.0 for dt in datetimes])
-    result = {'times': sim_times, 'datetimes': datetimes}
-    
-    # Process data columns
+    # Apply Hampel filter to data columns first (on raw CSV data)
+    data_columns = []
     for col in loader.columns:
-        if col == datetime_col:
-            continue
-            
         # Standardize column names
         import re
         if 'level' in col.lower():
@@ -120,14 +90,31 @@ def load_measured_data(csv_path: Union[str, Path] = None,
             name = col
         else:
             continue
+        data_columns.append((col, name))
         
+        # Apply Hampel filter on raw data
+        if hampel_window > 0:
+            loader.hampel_filter(col, window_size=hampel_window)
+    
+    # Apply alignment if requested
+    if align and align_freq > 0:
+        freq_str = f"{align_freq}h"  # Convert hours to frequency string
+        loader.align(freq_str, method='interpolate')
+    
+    # Convert times after potential alignment
+    datetimes = loader.get_datetimes()
+    sim_times = np.array([time_converter.to_seconds(dt) / 86400.0 for dt in datetimes])
+    result = {'times': sim_times, 'datetimes': datetimes}
+    
+    # Process data columns and apply remaining filters
+    for col, name in data_columns:
         values = loader.get_numeric(col)
         
-        # Apply filters
-        if hampel_window > 0:
-            values = hampel_filter(values, window_size=hampel_window)
+        # Apply smoothing filter
         if smooth_window > 1:
             values = pd.Series(values).rolling(smooth_window, center=True, min_periods=1).mean().values
+        
+        # Apply offset
         if name in offsets and offsets[name] != 0:
             values += offsets[name]
             print(f"  {name}: {offsets[name]:+.3f}m offset")

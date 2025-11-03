@@ -1,0 +1,77 @@
+# Open Windows PowerShell as admin
+wsl --install
+
+# Reboot
+# Install Ubuntu
+wsl --install Ubuntu-24.04 (to check version => wsl -l -v , to uninstall => wsl --unregister Ubuntu)
+
+
+# Define a pseudo and a password
+
+# get out of /mnt/c/WINDOWS/system32 folder 
+cd ~
+
+# Update package sources and install python3
+sudo apt update && sudo apt upgrade -y
+sudo apt install python3 python3-pip git curl build-essential -y
+sudo apt install python3.12-venv
+
+# Download firedrake-configure
+curl -O https://raw.githubusercontent.com/firedrakeproject/firedrake/release/scripts/firedrake-configure
+
+# Install system dependencies
+sudo apt install $(python3 firedrake-configure --show-system-packages)
+
+# Install PETSC
+git clone --branch $(python3 firedrake-configure --show-petsc-version) https://gitlab.com/petsc/petsc.git
+cd petsc
+python3 ../firedrake-configure --show-petsc-configure-options | xargs -L1 ./configure
+
+make PETSC_DIR=/path/to/petsc PETSC_ARCH=arch-firedrake-default all		!!! REPLACE path with your ubuntu pseudo name
+# SHOULD SHOW A LOT OF LINES WITHG CC arch- XXXXX
+# If not, check you properly put your pseudo in "path"
+
+make check
+cd ~
+
+# Install Firedrake
+# create a virtual environment
+python3 -m venv firedrake
+source firedrake/bin/activate
+
+# Purge pip cache and some other (recommanded)
+pip cache purge
+pip cache remove mpi4py
+pip cache remove petsc4py
+pip cache remove h5py
+pip cache remove slepc4py
+pip cache remove libsupermesh
+pip cache remove firedrake
+
+# Set some necessary env variables
+export $(python3 firedrake-configure --show-env)
+
+# supposed to show this -> CC=mpicc CXX=mpicxx PETSC_DIR=/path/to/petsc PETSC_ARCH=arch-firedrake-{default,complex} HDF5_MPI=ON
+
+# Install firedrake 
+pip install --no-binary h5py 'firedrake[check]'
+
+# Or to install PyTorch with it
+pip install --no-binary h5py 'firedrake[check,torch]' --extra-index-url https://download.pytorch.org/whl/cpu
+
+# Check installation
+firedrake-check
+
+# Install other useful libraries like pandas and meteostat
+pip install meteostat pandas
+
+# To use in VSCode 
+Install it and install the plug-in WSL
+activate it by clicking on it in the bottom left 
+!!! Install Python for Ubuntu !!! (in the plug-in windowd, usually need to update the python version
+select the interpreter : go in ubuntu file in the venv you created and find the python bin file
+# Install/update useful extensions like Data Wrangler (to visualize arrays), GitHub Copilot/Pull request, vscode-pdf
+
+
+
+

@@ -20,6 +20,19 @@ from .library import (
     HydraulicCurves
 )
 
+# Optimization modules
+from .optimization import (
+    ParameterOptimizer,
+    ObservationData,
+    ParameterBounds,
+    create_tight_bounds,
+    load_observations_from_csv,
+    plot_optimization_results,
+    compute_parameter_correlation,
+    estimate_computational_cost,
+    print_parameter_comparison
+)
+
 # Core physics modules
 from .physics import (
     VanGenuchtenModel,
@@ -51,7 +64,8 @@ from .tools import (
     CSVLoader,
     TimeConverter,
     fetch_rainfall_meteostat,
-    import_results
+    import_results,
+    load_measured_data
 )
 
 # Visualization
@@ -76,6 +90,18 @@ __all__ = [
     'SoilParameters',
     'ContaminantProperties',
     'HydraulicCurves',
+
+    # Optimization
+    'ParameterOptimizer',
+    'ObservationData',
+    'ParameterBounds',
+    'create_tight_bounds',
+
+    'load_observations_from_csv',
+    'plot_optimization_results',
+    'compute_parameter_correlation',
+    'estimate_computational_cost',
+    'print_parameter_comparison',
 
     # Physics
     'Domain',
@@ -104,6 +130,7 @@ __all__ = [
     'TimeConverter',
     'fetch_rainfall_meteostat',
     'import_results',
+    'load_measured_data',
 
     # Visualization
     'ResultsPlotter',
