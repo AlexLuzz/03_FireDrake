@@ -179,11 +179,14 @@ def main(generic_param):
     # Run optimization
     print("\n6. Running optimization...")
     best_params = optimizer.optimize(
-        n_iterations=2,
-        learning_rate=0.2,  # Lower for tight bounds
-        optimizer_type='adam',
-        use_finite_diff=False,
-        verbose=True
+        n_iterations=5,
+        learning_rate=0.3,  # Lower for tight bounds
+        epsilon_relative=1e-2,
+        adaptive_lr=True,
+        gradient_clip=10.0,
+        optimizer_type='sgd',
+        use_finite_diff=True,
+        verbose=False
     )
     
     # ==============================================================================
