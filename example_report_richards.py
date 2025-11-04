@@ -15,8 +15,8 @@ def main():
     config = SimulationConfig(
         name="Datetime_Duration",
         start_datetime=datetime(2024, 4, 15),
-        end_datetime=datetime(2024, 6, 30),
-        dt_td=timedelta(hours=1)
+        end_datetime=datetime(2024, 4, 30),
+        dt_td=timedelta(hours=6)
     )
     
     rain_zones = [

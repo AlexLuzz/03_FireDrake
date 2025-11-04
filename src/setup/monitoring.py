@@ -23,7 +23,7 @@ class ProbeManager:
         
         # Default probe positions
         if probe_positions is None:
-            probe_positions = [[8.0, 0.5], [10.0, 0.5], [12.5, 0.5]]
+            probe_positions = [[8.0, 1.0], [10.0, 1.0], [12.5, 1.0]]
         
         self.probe_positions = probe_positions
         self.names = names or [f"Probe_{i+1}" for i in range(len(probe_positions))]

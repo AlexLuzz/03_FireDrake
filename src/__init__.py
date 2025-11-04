@@ -22,15 +22,16 @@ from .library import (
 
 # Optimization modules
 from .optimization import (
-    ParameterOptimizer,
     ObservationData,
     ParameterBounds,
+    AdjointOptimizer,
     create_tight_bounds,
-    load_observations_from_csv,
+    create_parameter_controls,
+
     plot_optimization_results,
-    compute_parameter_correlation,
-    estimate_computational_cost,
-    print_parameter_comparison
+    print_parameter_comparison,
+    plot_residual_analysis,
+    validate_optimized_parameters,
 )
 
 # Core physics modules
@@ -92,16 +93,16 @@ __all__ = [
     'HydraulicCurves',
 
     # Optimization
-    'ParameterOptimizer',
     'ObservationData',
     'ParameterBounds',
+    'AdjointOptimizer',
     'create_tight_bounds',
+    'create_parameter_controls',
 
-    'load_observations_from_csv',
     'plot_optimization_results',
-    'compute_parameter_correlation',
-    'estimate_computational_cost',
     'print_parameter_comparison',
+    'plot_residual_analysis',
+    'validate_optimized_parameters',
 
     # Physics
     'Domain',

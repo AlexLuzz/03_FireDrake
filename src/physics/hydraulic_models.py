@@ -44,6 +44,7 @@ import numpy as np
 from .curve_tools import CurveData, CurveInterpolator
 from scipy.optimize import differential_evolution, minimize
 from typing import Literal, Optional, Dict, Tuple
+from firedrake import max_value, min_value
 
 # ==============================================
 # ABSTRACT BASE CLASS
@@ -153,6 +154,7 @@ class VanGenuchtenModel(HydraulicModel):
             return 1.0
         elif pressure <= -eps:
             Se = 1.0 / (1.0 + (alpha * abs(pressure))**n)**m
+            #return max_value(0.0, min_value(1.0, Se))  # clamp between 0 and 1
             return max(0.0, min(1.0, Se))  # clamp between 0 and 1
         else:
             Se_unsat = 1.0 / (1.0 + (alpha * eps)**n)**m # lower end (unsaturated)
@@ -569,9 +571,6 @@ class CurveBasedHydraulicModel(HydraulicModel):
                 bounds=bounds,
                 options={'maxiter': 1000, 'disp': verbose}
             )
-        
-        if not result.success:
-            warnings.warn(f"Optimization did not converge: {result.message}")
         
         # ============================================
         # STEP 5: Extract fitted parameters

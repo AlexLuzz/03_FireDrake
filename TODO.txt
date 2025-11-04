@@ -10,7 +10,6 @@
     - [ ] Check ponding problem
 
     ## Medium Priority ⚡
-    - [ ] Evaluate real OFFSET for CG LTC probes
     - [ ] Hybrid display on results, plot water table / rain mm / salt flux
     - [ ] Test SUPG and/or crank nicholson for transport ? 
 
@@ -25,6 +24,8 @@
     - [ ] Import curves from txt/csv
 
 ## ✅ Completed
+- [x] Evaluate real OFFSET for CG LTC probes
+- [x] Implement verbose in the solvers ! (too MANY TEXT)
 - [x] Fit RAF curves to use fast vg params instead
 - [x] D0 problem OR just values too low and mass loss - seems to be working !
 - [x] Add processing duration in config and add it to the report

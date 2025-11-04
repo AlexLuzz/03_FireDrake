@@ -6,13 +6,14 @@ from firedrake import (
 from ..tools.tools import loading_bar
 
 class RichardsSolver:
-    def __init__(self, domain, V, field_map, source_scenario, bc_manager, config):
+    def __init__(self, domain, V, field_map, source_scenario, bc_manager, config, verbose=True):
         self.mesh = domain.mesh  # Use domain's mesh
         self.V = V
         self.field_map = field_map
         self.source_scenario = source_scenario
         self.bc_manager = bc_manager
         self.config = config
+        self.verbose = verbose
         
         self.p_n = Function(V, name="Pressure_old")
         self.p_new = Function(V, name="Pressure")
@@ -53,8 +54,9 @@ class RichardsSolver:
         self.p_n.assign(self.p_new)
     
     def run(self, probe_manager=None, snapshot_manager=None):
-        print("Starting simulation...")
-        print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
+        if self.verbose:
+            print("Starting simulation...")
+            print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
         
         # Record initial conditions (t=0)
         if probe_manager is not None:
@@ -82,7 +84,8 @@ class RichardsSolver:
                     snapshot_manager.record(t, Se, "saturation", verbose=False)
 
             # Loading bar
-            loading_bar(step, t, self.config)
-            #
+            if self.verbose:
+                loading_bar(step, t, self.config)
         
-        print("\n\nSimulation complete!")
+        if self.verbose:
+            print("\n\nSimulation complete!")

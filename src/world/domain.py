@@ -1,6 +1,7 @@
-from firedrake import RectangleMesh
+from firedrake import RectangleMesh, FunctionSpace
 import numpy as np
 from typing import Callable, List, Tuple
+from .field_mapping import MaterialField
 
 class Domain:
     def __init__(self, nx: int, ny: int, Lx: float, Ly: float):

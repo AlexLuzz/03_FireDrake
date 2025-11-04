@@ -45,7 +45,6 @@ def main():
     # ==========================================
     # 4. MATERIALS (properties)
     # ==========================================
-    from firedrake import Constant
     domain.assign("base", Material.till())
     domain.assign("GI", Material.terreau())
 

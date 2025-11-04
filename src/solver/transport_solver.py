@@ -10,7 +10,7 @@ import numpy as np
 
 class TransportSolver:
     def __init__(self, domain, V, field_map, pressure_solver, 
-                 bc_manager, transport_source, config, debug=False):
+                 bc_manager, transport_source, config, verbose=False):
         """
         Parameters:
         -----------
@@ -28,8 +28,8 @@ class TransportSolver:
             Source/sink terms for contaminant
         config : Config
             Simulation configuration
-        debug : bool
-            Enable debug output
+        verbose : bool
+            Enable verbose output
         """
         if not field_map.has_transport():
             raise ValueError("MaterialField must have transport models assigned")
@@ -44,7 +44,7 @@ class TransportSolver:
         self.transport_source = transport_source
         
         self.config = config
-        self.debug = debug
+        self.verbose = verbose
         self.dx = dx(domain=self.mesh)
 
         # Concentration fields
@@ -180,7 +180,7 @@ class TransportSolver:
         if negative_nodes.any():
             num_negative = negative_nodes.sum()
             min_val = c_data.min()
-            if self.debug:
+            if self.verbose:
                 print(f"  WARNING: {num_negative} nodes with negative concentration (min={min_val:.3f}), setting to 0")
             c_data[negative_nodes] = 0.0
 
@@ -204,8 +204,9 @@ class TransportSolver:
         1. Solve Richards equation (handled by pressure_solver)
         2. Solve transport equation
         """
-        print("Starting coupled flow-transport simulation...")
-        print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
+        if self.verbose:
+            print("Starting coupled flow-transport simulation...")
+            print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
         
         t = 0.0
 
@@ -237,13 +238,14 @@ class TransportSolver:
                     snapshot_manager.record(t, self.c_new, "concentration")
 
             # Progress bar
-            if step % max(1, int(0.05 * self.config.num_steps)) == 0:
-                progress = step / self.config.num_steps
-                bar_length = 40
-                filled_length = int(bar_length * progress)
-                bar = '█' * filled_length + '░' * (bar_length - filled_length)
-                print(f"\rProgress: [{bar}] {progress*100:.1f}% | "
-                      f"Time: {t/3600:.1f}h / {self.config.t_end/3600:.1f}h", 
-                      end='', flush=True)
-        
-        print("\n\nCoupled simulation complete!")
+            if self.verbose:
+                if step % max(1, int(0.05 * self.config.num_steps)) == 0:
+                    progress = step / self.config.num_steps
+                    bar_length = 40
+                    filled_length = int(bar_length * progress)
+                    bar = '█' * filled_length + '░' * (bar_length - filled_length)
+                    print(f"\rProgress: [{bar}] {progress*100:.1f}% | "
+                        f"Time: {t/3600:.1f}h / {self.config.t_end/3600:.1f}h", 
+                        end='', flush=True)
+        if self.verbose:
+            print("\nCoupled simulation complete!")
