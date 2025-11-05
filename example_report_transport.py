@@ -16,7 +16,7 @@ def main_transport():
         name="Transport_Chloride",
         start_datetime=datetime(2024, 5, 1),
         end_datetime=datetime(2024, 5, 10),
-        dt_td=timedelta(hours=1)
+        dt_td=timedelta(hours=3)
     )
     
     rain_zones = [

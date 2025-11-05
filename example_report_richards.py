@@ -37,26 +37,24 @@ def main():
 
     domain.assign("base", Material.till())
     domain.assign("GI", Material.terreau())
-
-    V = FunctionSpace(domain.mesh, "CG", 1)
-    field_map = MaterialField(domain, V)
     
-    bc_manager = BoundaryConditionManager(V, left_wt=1.2, right_wt=1.2)
+    bc_manager = BoundaryConditionManager(domain.V, left_wt=1.2, right_wt=1.2)
     
     probe_manager = ProbeManager(domain.mesh)
     snapshot_times = [0.0, 5*3600.0, config.t_end * 0.1, config.t_end * 0.3, config.t_end * 0.7, config.t_end]
     snapshot_manager = SnapshotManager(snapshot_times)
     
     solver = RichardsSolver(
-        domain=domain, V=V, field_map=field_map,
+        domain=domain,
         source_scenario=rain_source,
-        bc_manager=bc_manager, config=config
+        bc_manager=bc_manager, 
+        config=config
     )
     
     solver.run(probe_manager, snapshot_manager)
         
     plotter = ResultsPlotter(
-        config, domain.mesh,
+        config,
         probe_manager=probe_manager,
         rain_scenario=rain_source,
         domain=domain,

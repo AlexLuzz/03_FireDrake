@@ -51,13 +51,12 @@ def main():
     # ==========================================
     # 5. MAPPING (connect materials to domain)
     # ==========================================
-    V = FunctionSpace(domain.mesh, "CG", 1)
-    field_map = MaterialField(domain, V)
+    field_map = MaterialField(domain)
     
     # ==========================================
     # 7. BOUNDARY CONDITIONS
     # ==========================================
-    bc_manager = BoundaryConditionManager(V, left_wt=0.6, right_wt=1.5,
+    bc_manager = BoundaryConditionManager(field_map.V, left_wt=0.6, right_wt=1.5,
                                     left_trend=(config.end_datetime, 0.5),
                                     right_trend=(config.end_datetime, 1.1),
                                     time_converter=config.time_converter)
@@ -78,12 +77,10 @@ def main():
     snapshot_manager = SnapshotManager(snapshot_times)
     
     # ==========================================
-    # 9. SOLVER (now receives field_map!)
+    # 9. SOLVER
     # ==========================================
     solver = RichardsSolver(
-        domain=domain,
-        V=V,
-        field_map=field_map,  # NEW: field_map instead of domain
+        field_map=field_map,
         source_scenario=rain_source,
         bc_manager=bc_manager,
         config=config
@@ -100,10 +97,10 @@ def main():
     now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     plotter = ResultsPlotter(
-        config, domain.mesh, 
+        config,
         probe_manager=probe_manager, 
         rain_scenario=rain_source, 
-        domain=domain,
+        mesh=domain.mesh,
         snapshot_manager=snapshot_manager,
         bc_manager=bc_manager
     )

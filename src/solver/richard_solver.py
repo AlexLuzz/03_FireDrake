@@ -6,17 +6,20 @@ from firedrake import (
 from ..tools.tools import loading_bar
 
 class RichardsSolver:
-    def __init__(self, domain, V, field_map, source_scenario, bc_manager, config, verbose=True):
-        self.mesh = domain.mesh  # Use domain's mesh
-        self.V = V
+    def __init__(self, field_map, source_scenario, bc_manager, config, verbose=True):
+        
         self.field_map = field_map
+        self.domain = self.field_map.domain
+        self.mesh = self.domain.mesh
+        self.V = self.field_map.V
+        
         self.source_scenario = source_scenario
         self.bc_manager = bc_manager
         self.config = config
         self.verbose = verbose
         
-        self.p_n = Function(V, name="Pressure_old")
-        self.p_new = Function(V, name="Pressure")
+        self.p_n = Function(self.V, name="Pressure_old")
+        self.p_new = Function(self.V, name="Pressure")
         
         self._set_initial_conditions()
     

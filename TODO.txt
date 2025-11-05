@@ -3,7 +3,7 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [ ] Use pyTorch and code a optimization loop to auto-fit parameters ! (probably doable for richard's) 
+    - [ ] Use pyadjoint and code a optimization loop to auto-fit parameters ! (probably doable for richard's) 
     - [ ] Implement test script with ANALYTICAL solution for validation
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
     - [ ] adaptative timestep
@@ -18,7 +18,7 @@
     - [ ] Track processing time to evaluate what takes time, and ...
 
     ## ULTRA Low Priority 💡
-    - [ ] Improve functionSpace and boundary conditions declaration logic
+    - [x-ish] Improve functionSpace and boundary conditions declaration logic - Maybe a manager would clarify and avoid lot of repetitions
     - [ ] Code cleanup
     - [ ] Documentation
     - [ ] Import curves from txt/csv

@@ -1,4 +1,4 @@
-from firedrake import Function
+from firedrake import Function, FunctionSpace
 import numpy as np
 from typing import Optional
 from ..physics.geophysical_models import archie_resistivity, ArchieParams, fluid_resistivity_from_concentration
@@ -10,18 +10,14 @@ class MaterialField:
     All inputs/outputs are Firedrake Functions
     """
     
-    def __init__(self, domain, function_space, 
-                 transport: bool = True,
-                 geophysics: bool = False):
+    def __init__(self, domain):
 
         self.domain = domain
         domain.validate()
         print(domain)
 
-        self.V = function_space
-        self.transport = transport
-        self.geophysics = geophysics
-    
+        self.V = FunctionSpace(domain.mesh, "CG", 1)
+        
     def _compute_field(self, state_functions, property_func):
         """
         Generic spatial mapping: material properties → mesh fields

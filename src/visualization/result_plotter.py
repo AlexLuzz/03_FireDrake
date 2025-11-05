@@ -10,19 +10,18 @@ from .plot_configs import DEFAULT_FIELDS, DEFAULT_STYLES, FieldConfig, TimeSerie
 
 class ResultsPlotter(BasicPlotting):
     
-    def __init__(self, config=None, mesh=None, probe_manager=None, rain_scenario=None,
-                 domain=None, snapshot_manager=None, bc_manager=None,
+    def __init__(self, config=None, probe_manager=None, rain_scenario=None,
+                 mesh=None, snapshot_manager=None, bc_manager=None,
                  field_configs: Dict[str, FieldConfig] = None,
                  timeseries_styles: Dict[str, TimeSeriesStyle] = None):
         
         self.config = config
         self.mesh = mesh
-        self.coords = mesh.coordinates.dat.data if mesh else None
+        self.coords = self.mesh.coordinates.dat.data_ro
         self.probe_manager = probe_manager
         self.snapshot_manager = snapshot_manager
         self.rain_scenario = rain_scenario
         self.bc_manager = bc_manager
-        self.domain = domain
         
         self.field_configs = DEFAULT_FIELDS.copy()
         if field_configs:
@@ -307,10 +306,9 @@ class ResultsPlotter(BasicPlotting):
                 else:
                     ax.set_title(f't = {t/3600:.1f}h', fontsize=11, fontweight='bold')
                 
-                if self.domain:
-                    ax.set_xlim(0, self.domain.Lx)
-                    ax.set_ylim(0, self.domain.Ly)
-            
+                ax.set_xlim(0, self.coords[:, 0].max())
+                ax.set_ylim(0, self.coords[:, 1].max())
+
             # Position colorbar lower and make it smaller
             # Adjust position based on the figure layout: [left, bottom, width, height]
             cbar_ax = fig.add_axes([0.92, 0.15, 0.015, 0.25])

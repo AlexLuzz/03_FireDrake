@@ -12,7 +12,7 @@ class Domain:
         
         # Create Firedrake mesh directly
         self.mesh = RectangleMesh(nx, ny, Lx, Ly)
-        
+
         # Get coordinates for region definitions
         self.coords = self.mesh.coordinates.dat.data_ro
         
