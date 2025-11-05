@@ -63,8 +63,8 @@ class RichardsSolver:
         
         # Record initial conditions (t=0)
         if probe_manager is not None:
-            probe_manager.record(0.0, self.p_n, "pressure")
-            probe_manager.record_water_table(0.0, self.p_n)
+            probe_manager.record(0.0, self.p_n, "water_table")
+            #probe_manager.record_water_table(0.0, self.p_n)
         if snapshot_manager is not None:
             if snapshot_manager.should_record(0.0, self.config.dt):
                 Se = self.field_map.get_Se_field(self.p_n)
@@ -77,8 +77,8 @@ class RichardsSolver:
             
             # Record probes (generic + specialized)
             if probe_manager is not None:
-                probe_manager.record(t, self.p_new, "pressure")
-                probe_manager.record_water_table(t, self.p_new)
+                probe_manager.record(t, self.p_new, "water_table")
+                #probe_manager.record_water_table(t, self.p_new)
             
             # Record snapshots
             if snapshot_manager is not None:

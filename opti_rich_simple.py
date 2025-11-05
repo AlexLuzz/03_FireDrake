@@ -9,7 +9,8 @@ This demonstrates the complete workflow:
 """
 import numpy as np
 from src import *
-from firedrake import FunctionSpace, Constant
+from firedrake import *
+from firedrake.adjoint import *
 from datetime import datetime, timedelta
 from pyadjoint import get_working_tape, continue_annotation, AdjFloat
 from typing import Dict
@@ -26,8 +27,8 @@ def your_simulation(param_constants: Dict[str, Constant]) -> ProbeManager:
     )
     
     rain_zones = [
-        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 'multiplier': param_constants['rain_mult_0']},
-        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': param_constants['rain_mult_1']},
+        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 'multiplier': 1.0},
+        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': 6.0},
     ]
     
     rain_source = rainfall_scenario(
@@ -39,43 +40,28 @@ def your_simulation(param_constants: Dict[str, Constant]) -> ProbeManager:
     )
 
     domain = Domain(nx=60, ny=30, Lx=20.0, Ly=5.0)
-    domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
 
     domain.assign("base", Material.till(
-        theta_r=param_constants['theta_r_till'],
-        theta_s=param_constants['theta_s_till'],
-        alpha=param_constants['alpha_till'],
-        n=param_constants['n_till'],
+        theta_r=0.02,
+        theta_s=0.14,
+        alpha=0.94,
+        n=2.3579,
         Ks=param_constants['Ks_till']
     ))
-
-    domain.assign("GI", Material.terreau(
-        theta_r=param_constants['theta_r_terreau'],
-        theta_s=param_constants['theta_s_terreau'],
-        alpha=param_constants['alpha_terreau'],
-        n=param_constants['n_terreau'],
-        Ks=param_constants['Ks_terreau']
-    ))
-
-    V = FunctionSpace(domain.mesh, "CG", 1)
-    field_map = MaterialField(domain, V)
+    field_map = MaterialField(domain)
 
     bc_manager = BoundaryConditionManager(
-        V, param_constants['wt_left'], param_constants['wt_right'],
-        left_trend=(generic_param['end_datetime'], param_constants['wt_left'] - param_constants['wt_trend']),
-        right_trend=(generic_param['end_datetime'], param_constants['wt_right'] - param_constants['wt_trend']),
-        time_converter=config.time_converter
+        field_map.V, left_wt=1.2, right_wt=1.5
     )
     
-    probe_pos = [(8.0, 1.0), (10.0, 1.0), (12.5, 1.0)]
-    probe_manager = ProbeManager(domain.mesh, probe_positions=probe_pos)
+    probe_manager = ProbeManager(domain.mesh)
 
     solver = RichardsSolver(
         field_map=field_map,
         source_scenario=rain_source,
         bc_manager=bc_manager,
         config=config,
-        verbose=False
+        verbose=True
     )
 
     solver.run(probe_manager)
@@ -103,6 +89,8 @@ def main(generic_param):
         align_freq=generic_param['timestep_hours']
     )
 
+    continue_annotation()
+
     observations = ObservationData(
         times=LTC_data['times'],
         locations=[[8.0, 1.0], [10.0, 1.0], [12.5, 1.0]],
@@ -123,27 +111,11 @@ def main(generic_param):
     
     initial_params = {
         # Till soil parameters (5)
-        'theta_r_till': 0.02,
-        'theta_s_till': 0.14,
-        'alpha_till': 0.9399,
-        'n_till': 2.3579,
+        #'theta_r_till': 0.02,
+        #'theta_s_till': 0.14,
+        #'alpha_till': 0.9399,
+        #'n_till': 2.3579,
         'Ks_till': 9e-6,
-        
-        # Terreau soil parameters (5)
-        'theta_r_terreau': 0.02,
-        'theta_s_terreau': 0.43,
-        'alpha_terreau': 1.1670,
-        'n_terreau': 2.1052,
-        'Ks_terreau': 4e-5,
-        
-        # Rain multipliers (2)
-        'rain_mult_0': 1.0,
-        'rain_mult_1': 6.0,
-        
-        # Water table conditions (3)
-        'wt_left': 0.8,
-        'wt_right': 1.5,
-        'wt_trend': 0.25
     }
     
     print(f"   ✓ Total parameters to optimize: {len(initial_params)}")
@@ -152,7 +124,6 @@ def main(generic_param):
     # STEP 3: Create parameter controls (Firedrake Constants)
     # -------------------------------------------------------------------------
     print("\n[STEP 3] Creating parameter controls...")
-    
     controls_dict, param_constants = create_parameter_controls(initial_params)
     print(f"   ✓ Created {len(controls_dict)} Firedrake Controls")
     
@@ -163,7 +134,7 @@ def main(generic_param):
     print("   (This may take a few minutes...)")
     
     # CRITICAL: Enable annotation to record operations on the tape!
-    continue_annotation()
+    get_working_tape().progress_bar = ProgressBar()
     probe_manager = your_simulation(param_constants)  # Returns ProbeManager!
     
     n_blocks = len(get_working_tape().get_blocks())
@@ -188,7 +159,8 @@ def main(generic_param):
     print()
     
     optimized_params = optimizer.optimize(
-        method='L-BFGS-B',
+        #method='L-BFGS-B',
+        method='SLSQP',
         maxiter=3,      # Start with 10, increase to 50 for production
         gtol=1e-3,
         verbose=True

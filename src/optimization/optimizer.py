@@ -113,35 +113,9 @@ class AdjointOptimizer:
                     self.observations.weights[cutoff:]
         return float(np.sum(residuals ** 2) / np.sum(self.observations.weights[cutoff:]))
     
-    def build_loss_functional(
-        self,
-        simulated_functions: List[Function],
-        observation_functions: List[Function]
-    ) -> AdjFloat:
-        """
-        Build differentiable loss functional using Firedrake functions
-        
-        CRITICAL: Loss must use Firedrake operations to be on the tape!
-        
-        Args:
-            simulated_functions: List of Function objects from simulation
-            observation_functions: List of Function objects with observations
-        
-        Returns:
-            Differentiable loss value (AdjFloat)
-        """
-        loss = Constant(0.0)
-        
-        for sim_fn, obs_fn in zip(simulated_functions, observation_functions):
-            # Compute squared difference using Firedrake operations
-            diff = sim_fn - obs_fn
-            loss += assemble(diff * diff * dx)
-        
-        return loss
-    
     def setup_optimization(
         self,
-        loss_functional: AdjFloat,
+        probe_manager: 'ProbeManager',  # Pass the ProbeManager!
         parameter_controls: Dict[str, Control],
         initial_params: Dict[str, float]
     ):
@@ -149,28 +123,77 @@ class AdjointOptimizer:
         Setup the reduced functional for optimization
         
         Args:
-            loss_functional: Loss computed during annotated forward solve (AdjFloat)
+            probe_manager: ProbeManager with recorded Functions
             parameter_controls: Dict of {param_name: Control(constant)}
-            initial_params: Dict of initial parameter values (for history tracking)
+            initial_params: Dict of initial parameter values
         """
+        # Compute loss from recorded Functions (stays on tape!)
+        loss = self._compute_loss_from_functions(probe_manager)
+        
         # Store control information
         self.control_names = list(parameter_controls.keys())
         self.controls = [parameter_controls[name] for name in self.control_names]
         
         # Create reduced functional
-        # The loss_functional is already on the tape from the forward solve!
-        self.reduced_functional = ReducedFunctional(loss_functional, self.controls)
+        self.reduced_functional = ReducedFunctional(loss, self.controls)
         
         # Store initial state
-        self.loss_history = [float(loss_functional)]
+        self.loss_history = [float(loss)]
         self.param_history = [initial_params.copy()]
         
         print(f"Optimization setup complete:")
-        print(f"  Initial loss: {float(loss_functional):.6e}")
+        print(f"  Initial loss: {float(loss):.6e}")
         print(f"  Parameters: {', '.join(self.control_names)}")
-        print(f"\nInitial parameter values:")
-        for name, val in initial_params.items():
-            print(f"  {name:20s} = {val:.6e}")
+    
+    def _compute_loss_from_functions(self, probe_manager):
+        """
+        Compute loss using assemble() to get proper OverloadedType
+        """
+        recorded_functions = probe_manager.get_recorded_functions()
+        if not recorded_functions:
+            raise RuntimeError("No Functions recorded in ProbeManager!")
+
+        n_times = len(recorded_functions)
+        cutoff = int(0.2 * n_times)
+        
+        P0 = probe_manager.P0DG
+        probe_y = np.array([pos[1] for pos in probe_manager.probe_positions])
+
+        # Accumulate loss as assembled scalars
+        total_loss = 0.0  # Start with float
+        n_obs = 0
+
+        for i, (t, field_name, field_at_probes) in enumerate(recorded_functions):
+            if i < cutoff:
+                continue
+
+            # field_at_probes is Function on VertexOnlyMesh
+            # Create observation Function
+            obs_func = Function(P0)
+            obs_func.dat.data[:] = self.observations.values[i, :] - probe_y  # Store as pressure
+            
+            # Weight Function  
+            weight_func = Function(P0)
+            weight_func.dat.data[:] = self.observations.weights[i, :]
+            
+            # Compute weighted residual (UFL)
+            # field_at_probes already has pressure, obs_func also has pressure
+            diff = field_at_probes - obs_func
+            weighted_diff = weight_func * diff
+            
+            # Assemble squared residual (this creates OverloadedType!)
+            loss_contribution = assemble(weighted_diff * weighted_diff * dx)
+            total_loss = total_loss + loss_contribution
+            
+            n_obs += len(probe_manager.probe_positions)
+
+        if n_obs == 0:
+            raise RuntimeError("No observations in loss computation")
+
+        # Normalize (scale the final OverloadedType)
+        total_loss = total_loss / float(n_obs)
+        
+        return total_loss
     
     def _callback(self, controls_values):
         """Callback to track optimization progress"""
@@ -210,24 +233,28 @@ class AdjointOptimizer:
             maxiter: Maximum iterations
             gtol: Gradient tolerance
             verbose: Print progress
-        
+         
         Returns:
             Dictionary of optimized parameters
         """
         if self.reduced_functional is None:
             raise RuntimeError("Must call setup_optimization() first!")
         
-        # Get bounds in correct format for scipy
+        # Get bounds as scipy-style list of (min, max) tuples per parameter
         min_vals, max_vals = self.bounds.get_bounds_lists()
+        # Get bounds in the SAME ORDER as self.control_names
+        min_vals = [self.bounds.bounds[name][0] for name in self.control_names]
+        max_vals = [self.bounds.bounds[name][1] for name in self.control_names]
         bounds_list = [min_vals, max_vals]
-        
-        if verbose:
-            print(f"\nStarting adjoint-based optimization:")
-            print(f"  Method: {method}")
-            print(f"  Max iterations: {maxiter}")
-            print(f"  Parameters: {len(self.controls)}")
-            print(f"  Adjoint tape blocks: {len(get_working_tape().get_blocks())}")
-            print()
+
+        # DEBUG: Print what we're passing
+        print("\n=== DEBUG BOUNDS ===")
+        print(f"Number of controls: {len(self.controls)}")
+        print(f"Control names: {self.control_names}")
+        print(f"Min vals ({len(min_vals)}): {min_vals}")
+        print(f"Max vals ({len(max_vals)}): {max_vals}")
+        print(f"Bounds list: {bounds_list}")
+        print("===================\n")
         
         # Reset iteration counter
         self.iteration_count = 0
@@ -268,6 +295,14 @@ def create_parameter_controls(params: Dict[str, float]) -> Tuple[Dict[str, Contr
     
     for name, value in params.items():
         const = Constant(value)  # Remove name parameter!
+
+        # DIAGNOSTIC: Check if Constant has adjoint support
+        print(f"\nDEBUG {name}:")
+        print(f"  Type: {type(const)}")
+        print(f"  Has ufl_element: {hasattr(const, 'ufl_element')}")
+        print(f"  Module: {type(const).__module__}")
+        print(f"  Value: {const.values()}")
+
         constants[name] = const
         controls[name] = Control(const)
     

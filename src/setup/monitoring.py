@@ -2,7 +2,7 @@
 Generic monitoring for time series and spatial snapshots
 """
 import numpy as np
-from firedrake import Function
+from firedrake import Function, FunctionSpace, VertexOnlyMesh, interpolate, Constant, assemble
 
 class ProbeManager:
     """
@@ -19,7 +19,6 @@ class ProbeManager:
         names : list of probe names
         """
         self.mesh = mesh
-        self.coords = mesh.coordinates.dat.data
         
         # Default probe positions
         if probe_positions is None:
@@ -28,12 +27,19 @@ class ProbeManager:
         self.probe_positions = probe_positions
         self.names = names or [f"Probe_{i+1}" for i in range(len(probe_positions))]
         
+        # Create vertex-only mesh at probe locations (stays on tape!)
+        self.vom = VertexOnlyMesh(mesh, probe_positions)
+        self.P0DG = FunctionSpace(self.vom, "DG", 0)
+
         # Data storage: {probe_name: {field_name: [values]}}
+        self.times = []
         self.data = {name: {} for name in self.names}
+        self.data_func = []
+
         # Global (non-probe) time series storage: {series_name: [values]}
         self.global_data = {}
-        self.times = []
         
+        self.coords = self.mesh.coordinates.dat.data_ro
         # Tolerance for finding nodes (1% of domain width)
         domain_width = self.coords[:, 0].max() - self.coords[:, 0].min()
         self.x_tol = domain_width * 0.01
@@ -53,7 +59,7 @@ class ProbeManager:
             indices.append(idx)
         return indices
 
-    def record(self, t: float, field: Function = None, field_name: str = "value", data: float = None):
+    def record_old(self, t: float, field: Function = None, field_name: str = "value", data: float = None):
         """
         Record field values at all probe locations (GENERIC)
         
@@ -88,57 +94,57 @@ class ProbeManager:
             self.global_data[field_name].append(float(data))
             return
     
-    def record_water_table(self, t: float, pressure_field):
+    def record(self, t: float, field: Function = None, field_name: str = "value", 
+               data: float = None, store_function: bool = True):
         """
-        Record water table elevation (specialized method)
-        Finds where pressure = 0 along vertical at each probe x-position
+        Record field values at all probe locations (GENERIC)
+        
+        Parameters:
+        -----------
+        t : float
+            Time [s]
+        field : Firedrake Function
+            Any field to monitor (pressure, concentration, etc.)
+        field_name : str
+            Name for this field (e.g., "pressure", "concentration")
+        data : float
+            Generic scalar/array for global time series
+        store_function : bool
+            If True, also store the interpolated Function (for adjoint)
         """
+        # Add time if this is a new timestep
         if not self.times or self.times[-1] != t:
             self.times.append(t)
-        
-        p_vals = pressure_field.dat.data_ro
-        
-        for probe_pos, name in zip(self.probe_positions, self.names):
-            wt = self._find_water_table_at_x(probe_pos[0], p_vals)
+
+        # Case 1: Firedrake Function provided -> interpolate to probe points
+        if isinstance(field, Function):
+            # Use VertexOnlyMesh interpolation (stays on adjoint tape!)
+            field_at_probes = assemble(interpolate(field, self.P0DG))
+
+            # For water table, add probe y pos to convert pressure to elevation
+            #if field_name == "water_table":
+                #field_at_probes += Constant([probe[1] for probe in self.probe_positions])
+            probe_values = field_at_probes.dat.data_ro
             
-            if "water_table" not in self.data[name]:
-                self.data[name]["water_table"] = []
-            self.data[name]["water_table"].append(wt)
-    
-    def _find_water_table_at_x(self, x_pos: float, p_vals: np.ndarray):
-        """Find water table elevation at given x-position"""
-        # Find nodes near this x
-        mask = np.abs(self.coords[:, 0] - x_pos) < self.x_tol
-        if not np.any(mask):
-            return np.nan
+            # Store values in data dict
+            for name, val in zip(self.names, probe_values):
+                if field_name not in self.data[name]:
+                    self.data[name][field_name] = []
+                self.data[name][field_name].append(float(val))
+            
+            # Optionally store Function for adjoint
+            if store_function:
+                self.data_func.append([t, field_name, field_at_probes])
+            return
         
-        # Get y-coordinates and pressures
-        y_coords = self.coords[mask, 1]
-        p_at_x = p_vals[mask]
-        
-        # Sort by y
-        sort_idx = np.argsort(y_coords)
-        y_sorted = y_coords[sort_idx]
-        p_sorted = p_at_x[sort_idx]
-        
-        # Find zero crossing
-        if np.all(p_sorted > 0):
-            return float(y_sorted[-1])  # Fully saturated
-        if np.all(p_sorted < 0):
-            return float(y_sorted[0])   # Fully dry
-        
-        # Interpolate to find p=0
-        for i in range(len(p_sorted) - 1):
-            if (p_sorted[i] <= 0 <= p_sorted[i+1]) or (p_sorted[i+1] <= 0 <= p_sorted[i]):
-                if abs(p_sorted[i+1] - p_sorted[i]) > 1e-12:
-                    wt_y = y_sorted[i] - p_sorted[i] * (y_sorted[i+1] - y_sorted[i]) / (p_sorted[i+1] - p_sorted[i])
-                    return float(wt_y)
-        
-        return float(y_sorted[len(y_sorted)//2])
-    
-    def get_times_hours(self):
-        """Get times in hours"""
-        return np.array(self.times) / 3600.0
+        # Case 2: Generic scalar/array provided (global time series)
+        if data is None and field is not None:
+            data = field
+        if data is not None:
+            if field_name not in self.global_data:
+                self.global_data[field_name] = []
+            self.global_data[field_name].append(float(data))
+            return
     
     def get_probe_data(self, probe_name: str, field_name: str):
         """Get data for specific probe and field"""
@@ -147,6 +153,10 @@ class ProbeManager:
     def get_data(self):
         """Get all recorded data"""
         return {'times': np.array(self.times), 'data': self.data, 'global': self.global_data}
+    
+    def get_recorded_functions(self):
+        """Get stored Functions for adjoint optimization"""
+        return self.data_func
     
     def save_to_csv(self, filename: str):
         """Save all data to CSV"""

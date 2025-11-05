@@ -44,7 +44,7 @@ import numpy as np
 from .curve_tools import CurveData, CurveInterpolator
 from scipy.optimize import differential_evolution, minimize
 from typing import Literal, Optional, Dict, Tuple
-from firedrake import max_value, min_value
+from firedrake import Constant, conditional, min_value, max_value
 
 # ==============================================
 # ABSTRACT BASE CLASS
@@ -128,9 +128,9 @@ class VanGenuchtenModel(HydraulicModel):
             Specific storage coefficient [1/m]
         """
         self.params = params
-        self.epsilon = epsilon
-        self.kr_min = kr_min
-        self.Ss = Ss
+        self.epsilon = Constant(epsilon)
+        self.kr_min = Constant(kr_min)
+        self.Ss = Constant(Ss)
     
     @property
     def theta_r(self) -> float:
@@ -140,7 +140,7 @@ class VanGenuchtenModel(HydraulicModel):
     def theta_s(self) -> float:
         return self.params.theta_s
     
-    def _Se(self, pressure: float) -> float:
+    def _Se_old(self, pressure: float) -> float:
         """
         S_e(p): Effective saturation [-]
         S_e = 1 / [1 + (α|p|)^n]^m
@@ -162,18 +162,9 @@ class VanGenuchtenModel(HydraulicModel):
             weight = (pressure + eps) / (2.0 * eps)
             Se = Se_unsat + (1.0 - Se_unsat) * weight
             return max(0.0, min(1.0, Se))
-    
-    def _theta(self, pressure) -> float:
-        """
-        θ(p): Water content via Van Genuchten equation
-        θ(p) = θ_r + S_e(p) * (θ_s - θ_r)
-        """
-        theta_r = self.params.theta_r
-        theta_s = self.params.theta_s
-        Se = self._Se(pressure)
-        return theta_r + Se * (theta_s - theta_r)
 
-    def _kr(self, pressure) -> float:
+    
+    def _kr_old(self, pressure) -> float:
         """
         Kr(p): Relative permeability [-] via Mualem model
         Kr(p) = S_e(p)^l * [1 - (1 - S_e(p)^(1/m))^m]^2
@@ -199,15 +190,8 @@ class VanGenuchtenModel(HydraulicModel):
             weight = (pressure + eps) / (2.0 * eps)
             kr_val = kr_unsat + (1.0 - kr_unsat) * weight
             return max(self.kr_min, min(kr_val, 1.0))
-        
-    def _k(self, pressure, Ks) -> float:
-        """
-        K(p): Hydraulic conductivity [m/s]
-        K(p) = k_r(p) * K_s
-        """
-        return self._kr(pressure) * Ks
-
-    def _Cm(self, pressure) -> float:
+    
+    def _Cm_old(self, pressure) -> float:
         """
         Cm(p): Moisture capacity [1/m]
         Cm(p) = alpha * m / (1 - m) * (θ_s - θ_r) * S_e^(1/m) * (1 - S_e^(1/m))^m
@@ -241,7 +225,106 @@ class VanGenuchtenModel(HydraulicModel):
             weight = (pressure + eps) / (2.0 * eps)
             Cm_val = Cm_unsat + (self.Ss - Cm_unsat) * weight
             return max(self.Ss, Cm_val)
+        
+    def _theta(self, pressure) -> float:
+        """
+        θ(p): Water content via Van Genuchten equation
+        θ(p) = θ_r + S_e(p) * (θ_s - θ_r)
+        """
+        theta_r = self.params.theta_r
+        theta_s = self.params.theta_s
+        Se = self._Se(pressure)
+        return theta_r + Se * (theta_s - theta_r)
+    
+    def _k(self, pressure, Ks) -> float:
+        """
+        K(p): Hydraulic conductivity [m/s]
+        K(p) = k_r(p) * K_s
+        """
+        return self._kr(pressure) * Ks
+    
+            
+    def _Se(self, pressure):
+        """
+        S_e(p): Effective saturation [-]
+        Fast path for floats, symbolic path for UFL
+        """
+        eps = self.epsilon
+        alpha = self.params.alpha
+        n = self.params.n
+        m = self.params.m
 
+        Se = 1.0 / (1.0 + (alpha * abs(pressure))**n)**m
+        
+        Se_smooth = conditional(
+            pressure >= eps,
+            1.0,
+            conditional(
+                pressure <= -eps,
+                Se,
+                # Linear transition
+                (1.0 / (1.0 + (alpha * eps)**n)**m) + 
+                ((1.0 - (1.0 / (1.0 + (alpha * eps)**n)**m)) * (pressure + eps) / (2.0 * eps))
+            )
+        )
+        return min_value(1.0, max_value(0.0, Se_smooth))
+    
+    def _kr(self, pressure):
+        """
+        Kr(p): Relative permeability [-] via Mualem model
+        Kr(p) = S_e(p)^l * [1 - (1 - S_e(p)^(1/m))^m]^2
+        """
+        eps = self.epsilon
+        l = self.params.l_param
+        m = self.params.m
+        
+        Se = self._Se(pressure)
+        term = max_value(0.0, 1.0 - Se**(1.0/m))
+        kr_val = (Se**l) * (1.0 - term**m)**2
+        
+        kr_smooth = conditional(
+            pressure >= eps,
+            1.0,
+            conditional(
+                pressure <= -eps,
+                kr_val,
+                # Linear interpolation in transition
+                kr_val + (1.0 - kr_val) * (pressure + eps) / (2.0 * eps)
+            )
+        )
+        
+        return min_value(1.0, max_value(self.kr_min, kr_smooth))
+
+    def _Cm(self, pressure):
+        """
+        Cm(p): Moisture capacity [1/m]
+        Cm(p) = alpha * m / (1 - m) * (θ_s - θ_r) * S_e^(1/m) * (1 - S_e^(1/m))^m
+        """
+        alpha = self.params.alpha
+        m = self.params.m
+        theta_s = self.params.theta_s
+        theta_r = self.params.theta_r
+        eps = self.epsilon
+
+        Se = self._Se(pressure)
+        term = max_value(0.0, 1.0 - Se**(1.0 / m))
+        Cm_val = ((alpha * m) / (1.0 - m) *
+                (theta_s - theta_r) *
+                Se**(1.0 / m) *
+                term**m)
+        
+        Cm_smooth = conditional(
+            pressure >= eps,
+            self.Ss,
+            conditional(
+                pressure <= -eps,
+                Cm_val,
+                # Linear interpolation in transition
+                Cm_val + (self.Ss - Cm_val) * (pressure + eps) / (2.0 * eps)
+            )
+        )
+        
+        return max_value(self.Ss, Cm_smooth)
     
 # ==============================================
 # CURVE-BASED EMPIRICAL MODEL
