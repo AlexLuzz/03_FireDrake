@@ -121,9 +121,15 @@ class ProbeManager:
             # Use VertexOnlyMesh interpolation (stays on adjoint tape!)
             field_at_probes = assemble(interpolate(field, self.P0DG))
 
-            # For water table, add probe y pos to convert pressure to elevation
-            #if field_name == "water_table":
-                #field_at_probes += Constant([probe[1] for probe in self.probe_positions])
+            # Convert pressure head to total head by adding probe elevation (only for water table)
+            if field_name == "water_table":
+                probe_y_func = Function(self.P0DG)
+                probe_y_func.dat.data[:] = [probe[1] for probe in self.probe_positions]
+                # Need to project the sum back to a Function for .dat access
+                field_with_elevation = Function(self.P0DG)
+                field_with_elevation.assign(field_at_probes + probe_y_func)
+                field_at_probes = field_with_elevation
+            
             probe_values = field_at_probes.dat.data_ro
             
             # Store values in data dict

@@ -6,17 +6,45 @@ Plotting, analysis, and result visualization
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, Optional
-from .optimizer import AdjointOptimizer, create_parameter_controls
+from .optimizer import AdjointOptimizer, create_parameter_controls, ObservationData
 from pyadjoint import pause_annotation, continue_annotation
 
 
+def extract_probe_data(probe_manager, field_name: str = 'water_table'):
+    """
+    Extract probe data from ProbeManager and convert to numpy array
+    
+    Args:
+        probe_manager: ProbeManager object with recorded data
+        field_name: Name of field to extract (default: 'water_table')
+    
+    Returns:
+        numpy array of shape [n_times, n_probes]
+    """
+    probe_names = probe_manager.names
+    n_probes = len(probe_names)
+    
+    # Get data from first probe to determine n_times
+    first_probe_data = probe_manager.get_probe_data(probe_names[0], field_name)
+    n_times = len(first_probe_data)
+    
+    # Build array [n_times, n_probes]
+    result = np.zeros((n_times, n_probes))
+    for i, probe_name in enumerate(probe_names):
+        result[:, i] = probe_manager.get_probe_data(probe_name, field_name)
+    
+    return result
+
+
 def plot_optimization_results(
-    optimizer: AdjointOptimizer,
+    optimizer,
     forward_model_func,
-    observations,
+    observations: ObservationData,
     initial_params: Dict[str, float],
     optimized_params: Dict[str, float],
     mesh,
+    domain,
+    V,
     save_path: Optional[str] = None
 ):
     """
@@ -24,11 +52,13 @@ def plot_optimization_results(
     
     Args:
         optimizer: Fitted AdjointOptimizer with loss_history and param_history
-        forward_model_func: Your simulation function that takes param_constants dict
+        forward_model_func: Your simulation function that takes (param_constants, domain, V)
         observations: ObservationData object
         initial_params: Initial parameter values dict
         optimized_params: Optimized parameter values dict
         mesh: Firedrake mesh for creating parameter controls
+        domain: Domain object for simulation
+        V: FunctionSpace for simulation
         save_path: Optional path to save figure
     """
     # Run simulations to get data for plotting
@@ -37,12 +67,16 @@ def plot_optimization_results(
     # Initial simulation
     _, initial_constants = create_parameter_controls(initial_params, mesh)
     pause_annotation()  # Don't record these on tape
-    initial_sim = forward_model_func(initial_constants)
+    initial_sim_pm = forward_model_func(initial_constants, domain, V)
     
     # Optimized simulation  
     _, optimized_constants = create_parameter_controls(optimized_params, mesh)
-    optimized_sim = forward_model_func(optimized_constants)
+    optimized_sim_pm = forward_model_func(optimized_constants, domain, V)
     continue_annotation()
+    
+    # Extract data from ProbeManagers
+    initial_sim = extract_probe_data(initial_sim_pm)
+    optimized_sim = extract_probe_data(optimized_sim_pm)
     
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     
@@ -108,7 +142,7 @@ def plot_optimization_results(
     # -------------------------------------------------------------------------
     # 4-6. Time series for each probe
     # -------------------------------------------------------------------------
-    times_hours = observations.times / 3600
+    times_hours = observations.times * 24  # Convert days to hours
     n_probes = observations.values.shape[1]
     probe_names = ['Probe 1 (x=8.0m)', 'Probe 2 (x=10.0m)', 'Probe 3 (x=12.5m)']
     
@@ -229,6 +263,8 @@ def plot_residual_analysis(
     observations,
     optimized_params: Dict[str, float],
     mesh,
+    domain,
+    V,
     save_path: Optional[str] = None
 ):
     """
@@ -236,19 +272,24 @@ def plot_residual_analysis(
     
     Args:
         optimizer: AdjointOptimizer instance
-        forward_model_func: Your simulation function
+        forward_model_func: Your simulation function that takes (param_constants, domain, V)
         observations: ObservationData object
         optimized_params: Optimized parameter values
         mesh: Firedrake mesh for creating parameter controls
+        domain: Domain object for simulation
+        V: FunctionSpace for simulation
         save_path: Optional save path
     """
     # Run optimized simulation
     _, opt_constants = create_parameter_controls(optimized_params, mesh)
     pause_annotation()
-    optimized_sim = forward_model_func(opt_constants)
+    optimized_sim_pm = forward_model_func(opt_constants, domain, V)
     continue_annotation()
     
-    times_hours = observations.times / 3600
+    # Extract data from ProbeManager
+    optimized_sim = extract_probe_data(optimized_sim_pm)
+    
+    times_hours = observations.times * 24  # Convert days to hours
     n_probes = observations.values.shape[1]
     
     fig, axes = plt.subplots(n_probes, 2, figsize=(14, 4*n_probes))
@@ -305,6 +346,8 @@ def validate_optimized_parameters(
     observations,
     optimized_params: Dict[str, float],
     mesh,
+    domain,
+    V,
     n_runs: int = 2
 ):
     """
@@ -312,10 +355,12 @@ def validate_optimized_parameters(
     Useful to check simulation stability/convergence
     
     Args:
-        forward_model_func: Your simulation function
+        forward_model_func: Your simulation function that takes (param_constants, domain, V)
         observations: ObservationData object
         optimized_params: Optimized parameters to validate
         mesh: Firedrake mesh for creating parameter controls
+        domain: Domain object for simulation
+        V: FunctionSpace for simulation
         n_runs: Number of validation runs
     """
     print("\n" + "="*70)
@@ -328,8 +373,11 @@ def validate_optimized_parameters(
     for i in range(n_runs):
         print(f"\nRun {i+1}/{n_runs}...")
         pause_annotation()
-        sim = forward_model_func(opt_constants)
+        sim_pm = forward_model_func(opt_constants, domain, V)
         continue_annotation()
+        
+        # Extract data from ProbeManager
+        sim = extract_probe_data(sim_pm)
         
         # Compute loss
         cutoff = int(0.2 * len(sim))

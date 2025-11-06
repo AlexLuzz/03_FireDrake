@@ -106,6 +106,8 @@ def main(generic_param):
     )
     
     print(f"   ✓ Loaded {len(observations.values)} time steps")
+    print(f"   ✓ Time range: {observations.times[0]:.6f} to {observations.times[-1]:.6f} days")
+    print(f"   ✓ Time range: {observations.times[0]*24:.2f} to {observations.times[-1]*24:.2f} hours")
     print(f"   ✓ Monitoring {len(observations.locations)} probe locations")
     
     # -------------------------------------------------------------------------
@@ -168,8 +170,8 @@ def main(generic_param):
     
     optimized_params = optimizer.optimize(
         method='L-BFGS-B',
-        maxiter=20,     
-        gtol=5e-4,
+        maxiter=10,     
+        gtol=1e-3,
         verbose=True
     )
     
@@ -194,6 +196,8 @@ def main(generic_param):
         initial_params=initial_params,
         optimized_params=optimized_params,
         mesh=domain.mesh,
+        domain=domain,
+        V=V,
         save_path=save_path
     )
     
@@ -205,6 +209,8 @@ def main(generic_param):
         observations=observations,
         optimized_params=optimized_params,
         mesh=domain.mesh,
+        domain=domain,
+        V=V,
         save_path=residual_path
     )
     
@@ -217,6 +223,8 @@ def main(generic_param):
         observations=observations,
         optimized_params=optimized_params,
         mesh=domain.mesh,
+        domain=domain,
+        V=V,
         n_runs=3
     )
     
@@ -234,8 +242,8 @@ if __name__ == "__main__":
     # Simulation period
     generic_param = {
         'start_datetime': datetime(2024, 4, 15),
-        'end_datetime': datetime(2024, 4, 30),
-        'timestep_hours': 12,
+        'end_datetime': datetime(2024, 5, 30),
+        'timestep_hours': 6,
     }
     
     # Run optimization

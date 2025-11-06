@@ -161,7 +161,6 @@ class AdjointOptimizer:
         cutoff = int(0.2 * n_times)
         
         P0 = probe_manager.P0DG
-        probe_y = np.array([pos[1] for pos in probe_manager.probe_positions])
 
         # Accumulate loss as assembled scalars
         total_loss = 0.0  # Start with float
@@ -171,17 +170,17 @@ class AdjointOptimizer:
             if i < cutoff:
                 continue
 
-            # field_at_probes is Function on VertexOnlyMesh
-            # Create observation Function
+            # field_at_probes is Function on VertexOnlyMesh (already includes elevation!)
+            # Create observation Function (observations are total head/elevation)
             obs_func = Function(P0)
-            obs_func.dat.data[:] = self.observations.values[i, :] - probe_y  # Store as pressure
+            obs_func.dat.data[:] = self.observations.values[i, :]
             
             # Weight Function  
             weight_func = Function(P0)
             weight_func.dat.data[:] = self.observations.weights[i, :]
             
             # Compute weighted residual (UFL)
-            # field_at_probes already has pressure, obs_func also has pressure
+            # Both field_at_probes and obs_func are total heads (elevation)
             diff = field_at_probes - obs_func
             weighted_diff = weight_func * diff
             
