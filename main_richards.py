@@ -4,7 +4,6 @@ from src import *
 
 def main():
     """Main simulation with new architecture"""
-    
     # ==========================================
     # 1. CONFIGURATION
     # ==========================================
@@ -51,12 +50,13 @@ def main():
     # ==========================================
     # 5. MAPPING (connect materials to domain)
     # ==========================================
-    field_map = MaterialField(domain)
+    V = FunctionSpace(domain.mesh, "CG", 1)
+    field_map = MaterialField(domain, V)
     
     # ==========================================
     # 7. BOUNDARY CONDITIONS
     # ==========================================
-    bc_manager = BoundaryConditionManager(field_map.V, left_wt=0.6, right_wt=1.5,
+    bc_manager = BoundaryConditionManager(V, left_wt=0.6, right_wt=1.5,
                                     left_trend=(config.end_datetime, 0.5),
                                     right_trend=(config.end_datetime, 1.1),
                                     time_converter=config.time_converter)
@@ -80,6 +80,7 @@ def main():
     # 9. SOLVER
     # ==========================================
     solver = RichardsSolver(
+        V=V,
         field_map=field_map,
         source_scenario=rain_source,
         bc_manager=bc_manager,

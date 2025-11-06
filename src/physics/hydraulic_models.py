@@ -128,10 +128,10 @@ class VanGenuchtenModel(HydraulicModel):
             Specific storage coefficient [1/m]
         """
         self.params = params
-        self.epsilon = Constant(epsilon)
-        self.kr_min = Constant(kr_min)
-        self.Ss = Constant(Ss)
-    
+        self.epsilon = epsilon
+        self.kr_min = kr_min
+        self.Ss = Ss
+
     @property
     def theta_r(self) -> float:
         return self.params.theta_r
@@ -249,83 +249,144 @@ class VanGenuchtenModel(HydraulicModel):
         S_e(p): Effective saturation [-]
         Fast path for floats, symbolic path for UFL
         """
-        eps = self.epsilon
-        alpha = self.params.alpha
-        n = self.params.n
-        m = self.params.m
+        if hasattr(pressure, 'ufl_element'):
+            # Symbolic path for UFL
+            eps = self.epsilon
+            alpha = self.params.alpha
+            n = self.params.n
+            m = self.params.m
 
-        Se = 1.0 / (1.0 + (alpha * abs(pressure))**n)**m
-        
-        Se_smooth = conditional(
-            pressure >= eps,
-            1.0,
-            conditional(
-                pressure <= -eps,
-                Se,
-                # Linear transition
-                (1.0 / (1.0 + (alpha * eps)**n)**m) + 
-                ((1.0 - (1.0 / (1.0 + (alpha * eps)**n)**m)) * (pressure + eps) / (2.0 * eps))
+            Se = 1.0 / (1.0 + (alpha * abs(pressure))**n)**m
+            Se_smooth = conditional(
+                pressure >= eps,
+                1.0,
+                conditional(
+                    pressure <= -eps,
+                    Se,
+                    # Linear transition
+                    (1.0 / (1.0 + (alpha * eps)**n)**m) +
+                    ((1.0 - (1.0 / (1.0 + (alpha * eps)**n)**m)) * (pressure + eps) / (2.0 * eps))
+                )
             )
-        )
-        return min_value(1.0, max_value(0.0, Se_smooth))
+            return min_value(1.0, max_value(0.0, Se_smooth))
+        else:
+            eps = self.epsilon
+            alpha = self.params.alpha
+            n = self.params.n
+            m = self.params.m
+            if pressure >= eps:
+                return 1.0
+            elif pressure <= -eps:
+                Se = 1.0 / (1.0 + (alpha * abs(pressure))**n)**m
+                return max(0.0, min(1.0, Se))
+            else:
+                Se_unsat = 1.0 / (1.0 + (alpha * eps)**n)**m
+                weight = (pressure + eps) / (2.0 * eps)
+                Se = Se_unsat + (1.0 - Se_unsat) * weight
+                return max(0.0, min(1.0, Se))
     
     def _kr(self, pressure):
         """
         Kr(p): Relative permeability [-] via Mualem model
         Kr(p) = S_e(p)^l * [1 - (1 - S_e(p)^(1/m))^m]^2
         """
-        eps = self.epsilon
-        l = self.params.l_param
-        m = self.params.m
-        
-        Se = self._Se(pressure)
-        term = max_value(0.0, 1.0 - Se**(1.0/m))
-        kr_val = (Se**l) * (1.0 - term**m)**2
-        
-        kr_smooth = conditional(
-            pressure >= eps,
-            1.0,
-            conditional(
-                pressure <= -eps,
-                kr_val,
-                # Linear interpolation in transition
-                kr_val + (1.0 - kr_val) * (pressure + eps) / (2.0 * eps)
+        if hasattr(pressure, 'ufl_element'):
+            eps = self.epsilon
+            l = self.params.l_param
+            m = self.params.m
+            Se = self._Se(pressure)
+            term = max_value(0.0, 1.0 - Se**(1.0/m))
+            kr_val = (Se**l) * (1.0 - term**m)**2
+            kr_smooth = conditional(
+                pressure >= eps,
+                1.0,
+                conditional(
+                    pressure <= -eps,
+                    kr_val,
+                    # Linear interpolation in transition
+                    kr_val + (1.0 - kr_val) * (pressure + eps) / (2.0 * eps)
+                )
             )
-        )
-        
-        return min_value(1.0, max_value(self.kr_min, kr_smooth))
+            return min_value(1.0, max_value(self.kr_min, kr_smooth))
+        else:
+            eps = self.epsilon
+            l = self.params.l_param
+            m = self.params.m
+            if pressure >= eps:
+                return 1.0
+            elif pressure <= -eps:
+                Se = self._Se(pressure)
+                term = max(0.0, 1.0 - Se**(1.0/m))
+                kr_val = (Se**l) * (1.0 - term**m)**2
+                kr_min = self.kr_min
+                return max(kr_min, min(kr_val, 1.0))
+            else:
+                Se_unsat = self._Se(-eps)
+                term = max(0.0, 1.0 - Se_unsat**(1.0/m))
+                kr_unsat = (Se_unsat**l) * (1.0 - term**m)**2
+                kr_min = self.kr_min
+                kr_unsat = max(kr_min, min(kr_unsat, 1.0))
+                weight = (pressure + eps) / (2.0 * eps)
+                kr_val = kr_unsat + (1.0 - kr_unsat) * weight
+                return max(kr_min, min(kr_val, 1.0))
 
     def _Cm(self, pressure):
         """
         Cm(p): Moisture capacity [1/m]
         Cm(p) = alpha * m / (1 - m) * (θ_s - θ_r) * S_e^(1/m) * (1 - S_e^(1/m))^m
         """
-        alpha = self.params.alpha
-        m = self.params.m
-        theta_s = self.params.theta_s
-        theta_r = self.params.theta_r
-        eps = self.epsilon
-
-        Se = self._Se(pressure)
-        term = max_value(0.0, 1.0 - Se**(1.0 / m))
-        Cm_val = ((alpha * m) / (1.0 - m) *
-                (theta_s - theta_r) *
-                Se**(1.0 / m) *
-                term**m)
-        
-        Cm_smooth = conditional(
-            pressure >= eps,
-            self.Ss,
-            conditional(
-                pressure <= -eps,
-                Cm_val,
-                # Linear interpolation in transition
-                Cm_val + (self.Ss - Cm_val) * (pressure + eps) / (2.0 * eps)
+        if hasattr(pressure, 'ufl_element'):
+            alpha = self.params.alpha
+            m = self.params.m
+            theta_s = self.params.theta_s
+            theta_r = self.params.theta_r
+            eps = self.epsilon
+            Se = self._Se(pressure)
+            term = max_value(0.0, 1.0 - Se**(1.0 / m))
+            Cm_val = ((alpha * m) / (1.0 - m) *
+                    (theta_s - theta_r) *
+                    Se**(1.0 / m) *
+                    term**m)
+            Cm_smooth = conditional(
+                pressure >= eps,
+                self.Ss,
+                conditional(
+                    pressure <= -eps,
+                    Cm_val,
+                    # Linear interpolation in transition
+                    Cm_val + (self.Ss - Cm_val) * (pressure + eps) / (2.0 * eps)
+                )
             )
-        )
-        
-        return max_value(self.Ss, Cm_smooth)
-    
+            return max_value(self.Ss, Cm_smooth)
+        else:
+            alpha = self.params.alpha
+            m = self.params.m
+            theta_s = self.params.theta_s
+            theta_r = self.params.theta_r
+            eps = self.epsilon
+            Ss = self.Ss
+            if pressure >= eps:
+                return Ss
+            elif pressure <= -eps:
+                Se = self._Se(pressure)
+                term = max(0.0, 1.0 - Se**(1.0 / m))
+                Cm_val = ((alpha * m) / (1.0 - m) *
+                          (theta_s - theta_r) *
+                          Se**(1.0 / m) *
+                          term**m)
+                return max(Ss, Cm_val)
+            else:
+                Se_unsat = self._Se(-eps)
+                term = max(0.0, 1.0 - Se_unsat**(1.0 / m))
+                Cm_unsat = ((alpha * m) / (1.0 - m) *
+                            (theta_s - theta_r) *
+                            Se_unsat**(1.0 / m) *
+                            term**m)
+                Cm_unsat = max(Ss, Cm_unsat)
+                weight = (pressure + eps) / (2.0 * eps)
+                Cm_val = Cm_unsat + (Ss - Cm_unsat) * weight
+                return max(Ss, Cm_val)
+
 # ==============================================
 # CURVE-BASED EMPIRICAL MODEL
 # ==============================================

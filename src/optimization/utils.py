@@ -16,6 +16,7 @@ def plot_optimization_results(
     observations,
     initial_params: Dict[str, float],
     optimized_params: Dict[str, float],
+    mesh,
     save_path: Optional[str] = None
 ):
     """
@@ -27,18 +28,19 @@ def plot_optimization_results(
         observations: ObservationData object
         initial_params: Initial parameter values dict
         optimized_params: Optimized parameter values dict
+        mesh: Firedrake mesh for creating parameter controls
         save_path: Optional path to save figure
     """
     # Run simulations to get data for plotting
     print("Generating plots (running initial and optimized simulations)...")
     
     # Initial simulation
-    _, initial_constants = create_parameter_controls(initial_params)
+    _, initial_constants = create_parameter_controls(initial_params, mesh)
     pause_annotation()  # Don't record these on tape
     initial_sim = forward_model_func(initial_constants)
     
     # Optimized simulation  
-    _, optimized_constants = create_parameter_controls(optimized_params)
+    _, optimized_constants = create_parameter_controls(optimized_params, mesh)
     optimized_sim = forward_model_func(optimized_constants)
     continue_annotation()
     
@@ -226,6 +228,7 @@ def plot_residual_analysis(
     forward_model_func,
     observations,
     optimized_params: Dict[str, float],
+    mesh,
     save_path: Optional[str] = None
 ):
     """
@@ -236,10 +239,11 @@ def plot_residual_analysis(
         forward_model_func: Your simulation function
         observations: ObservationData object
         optimized_params: Optimized parameter values
+        mesh: Firedrake mesh for creating parameter controls
         save_path: Optional save path
     """
     # Run optimized simulation
-    _, opt_constants = create_parameter_controls(optimized_params)
+    _, opt_constants = create_parameter_controls(optimized_params, mesh)
     pause_annotation()
     optimized_sim = forward_model_func(opt_constants)
     continue_annotation()
@@ -300,6 +304,7 @@ def validate_optimized_parameters(
     forward_model_func,
     observations,
     optimized_params: Dict[str, float],
+    mesh,
     n_runs: int = 2
 ):
     """
@@ -310,13 +315,14 @@ def validate_optimized_parameters(
         forward_model_func: Your simulation function
         observations: ObservationData object
         optimized_params: Optimized parameters to validate
+        mesh: Firedrake mesh for creating parameter controls
         n_runs: Number of validation runs
     """
     print("\n" + "="*70)
     print("VALIDATION: Running multiple simulations with optimized parameters")
     print("="*70)
     
-    _, opt_constants = create_parameter_controls(optimized_params)
+    _, opt_constants = create_parameter_controls(optimized_params, mesh)
     
     losses = []
     for i in range(n_runs):

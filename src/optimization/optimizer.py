@@ -6,9 +6,10 @@ Uses pyadjoint for automatic differentiation through the PDE solve
 import numpy as np
 from typing import Dict, Tuple, List, Optional
 from dataclasses import dataclass
-from firedrake import *
-from firedrake.adjoint import *
-from pyadjoint import Control, ReducedFunctional, minimize
+from firedrake import Function, assemble, Constant, FunctionSpace, dx
+# Use the Firedrake-adjoint wrappers for pyadjoint primitives to ensure
+# correct Constant/Control handling in this environment.
+from firedrake.adjoint import Control, ReducedFunctional, minimize
 
 
 def get_constant_value(obj) -> float:
@@ -117,6 +118,7 @@ class AdjointOptimizer:
         self,
         probe_manager: 'ProbeManager',  # Pass the ProbeManager!
         parameter_controls: Dict[str, Control],
+        param_functions: Dict[str, 'Function'],
         initial_params: Dict[str, float]
     ):
         """
@@ -124,7 +126,8 @@ class AdjointOptimizer:
         
         Args:
             probe_manager: ProbeManager with recorded Functions
-            parameter_controls: Dict of {param_name: Control(constant)}
+            parameter_controls: Dict of {param_name: Control(Function)}
+            param_functions: Dict of {param_name: Function} - the underlying Function objects
             initial_params: Dict of initial parameter values
         """
         # Compute loss from recorded Functions (stays on tape!)
@@ -133,6 +136,7 @@ class AdjointOptimizer:
         # Store control information
         self.control_names = list(parameter_controls.keys())
         self.controls = [parameter_controls[name] for name in self.control_names]
+        self.control_functions = [param_functions[name] for name in self.control_names]
         
         # Create reduced functional
         self.reduced_functional = ReducedFunctional(loss, self.controls)
@@ -182,30 +186,42 @@ class AdjointOptimizer:
             weighted_diff = weight_func * diff
             
             # Assemble squared residual (this creates OverloadedType!)
-            loss_contribution = assemble(weighted_diff * weighted_diff * dx)
-            total_loss = total_loss + loss_contribution
-            
+            total_loss += weighted_diff * weighted_diff * dx            
             n_obs += len(probe_manager.probe_positions)
 
         if n_obs == 0:
             raise RuntimeError("No observations in loss computation")
 
-        # Normalize (scale the final OverloadedType)
-        total_loss = total_loss / float(n_obs)
-        
-        return total_loss
+        # Assemble symbolic loss at the end
+        loss = assemble(Constant(1.0 / float(n_obs)) * total_loss)
+        return loss
     
     def _callback(self, controls_values):
         """Callback to track optimization progress"""
         self.iteration_count += 1
         
+        # Convert numpy array to list
+        if hasattr(controls_values, 'tolist'):
+            values_list = controls_values.tolist()
+        else:
+            values_list = list(controls_values)
+        
+        # Update Function objects with new values and pass to ReducedFunctional
+        # ReducedFunctional expects Function objects, not scalar values
+        funcs_list = []
+        for func, val in zip(self.control_functions, values_list):
+            # Create a copy and assign the new scalar value
+            func_copy = func.copy(deepcopy=True)
+            func_copy.dat.data[:] = val
+            funcs_list.append(func_copy)
+        
         # Evaluate loss at current parameters
-        current_loss = float(self.reduced_functional(controls_values))
+        current_loss = float(self.reduced_functional(funcs_list))
         self.loss_history.append(current_loss)
         
         # Store parameters
         params = {name: float(val) 
-                 for name, val in zip(self.control_names, controls_values)}
+                 for name, val in zip(self.control_names, values_list)}
         self.param_history.append(params)
         
         print(f"Iteration {self.iteration_count}: Loss = {current_loss:.6e}")
@@ -240,12 +256,16 @@ class AdjointOptimizer:
         if self.reduced_functional is None:
             raise RuntimeError("Must call setup_optimization() first!")
         
-        # Get bounds as scipy-style list of (min, max) tuples per parameter
-        min_vals, max_vals = self.bounds.get_bounds_lists()
         # Get bounds in the SAME ORDER as self.control_names
         min_vals = [self.bounds.bounds[name][0] for name in self.control_names]
         max_vals = [self.bounds.bounds[name][1] for name in self.control_names]
-        bounds_list = [min_vals, max_vals]
+        # Pyadjoint expects:
+        #  - single parameter: [lower, upper]
+        #  - multiple parameters: [[lower1, ...], [upper1, ...]]
+        if len(self.controls) == 1:
+            bounds_list = [min_vals[0], max_vals[0]]
+        else:
+            bounds_list = [min_vals, max_vals]
 
         # DEBUG: Print what we're passing
         print("\n=== DEBUG BOUNDS ===")
@@ -272,8 +292,18 @@ class AdjointOptimizer:
             }
         )
         
+        # Extract scalar values from Function objects (R-space Functions have single DOF)
+        scalar_values = []
+        for func in optimal_values:
+            if hasattr(func, 'dat'):
+                # It's a Function - extract the single scalar value
+                scalar_values.append(float(func.dat.data[0]))
+            else:
+                # Already a scalar
+                scalar_values.append(float(func))
+        
         # Convert to dictionary
-        result = {name: float(val) for name, val in zip(self.control_names, optimal_values)}
+        result = {name: val for name, val in zip(self.control_names, scalar_values)}
         
         if verbose:
             print("\nOptimization complete!")
@@ -286,27 +316,34 @@ class AdjointOptimizer:
         return result
 
 
-def create_parameter_controls(params: Dict[str, float]) -> Tuple[Dict[str, Control], Dict[str, Constant]]:
+def create_parameter_controls(params: Dict[str, float], mesh) -> Tuple[Dict[str, Control], Dict[str, Function]]:
     """
-    Helper function to create Constant parameters with Controls
+    Helper function to create scalar Function parameters with Controls
+    
+    Uses "R" (Real) function space - a special 0D space with exactly 1 DOF per parameter.
+    This gives us scalar values that work correctly with pyadjoint's serialization.
+    
+    Args:
+        params: Dictionary of parameter names and initial values
+        mesh: The mesh to create the R space on
+        
+    Returns:
+        (controls_dict, functions_dict) where functions_dict contains scalar Functions
     """
     controls = {}
-    constants = {}
+    functions = {}
+    
+    # Create a "Real" space - this is a 0-dimensional space with 1 DOF (scalar)
+    R = FunctionSpace(mesh, "R", 0)
     
     for name, value in params.items():
-        const = Constant(value)  # Remove name parameter!
-
-        # DIAGNOSTIC: Check if Constant has adjoint support
-        print(f"\nDEBUG {name}:")
-        print(f"  Type: {type(const)}")
-        print(f"  Has ufl_element: {hasattr(const, 'ufl_element')}")
-        print(f"  Module: {type(const).__module__}")
-        print(f"  Value: {const.values()}")
-
-        constants[name] = const
-        controls[name] = Control(const)
+        # Create a scalar Function on R space
+        f_param = Function(R, name=name)
+        f_param.assign(value)
+        functions[name] = f_param
+        controls[name] = Control(f_param)
     
-    return controls, constants
+    return controls, functions
 
 
 def create_tight_bounds(

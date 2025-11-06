@@ -1,7 +1,6 @@
-from firedrake import RectangleMesh, FunctionSpace
+from firedrake import RectangleMesh
 import numpy as np
 from typing import Callable, List, Tuple
-from .field_mapping import MaterialField
 
 class Domain:
     def __init__(self, nx: int, ny: int, Lx: float, Ly: float):
@@ -102,3 +101,16 @@ class Domain:
     
     def __repr__(self):
         return f"Domain({self.nx}×{self.ny}, {self.Lx}m×{self.Ly}m, {len(self.regions)} regions, {len(self.materials)} assigned)"
+    
+    def prepare_for_symbolic_mode(self, function_space):
+        """
+        Pre-compute region indicator Functions for symbolic mode
+        Call this once before optimization
+        """
+        from firedrake import Function
+        
+        self.region_indicators = {}
+        for region_name, mask in self.regions.items():
+            indicator = Function(function_space, name=f"indicator_{region_name}")
+            indicator.dat.data[:] = mask.astype(float)
+            self.region_indicators[region_name] = indicator

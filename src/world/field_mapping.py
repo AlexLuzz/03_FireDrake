@@ -1,4 +1,4 @@
-from firedrake import Function, FunctionSpace
+from firedrake import Function, Constant
 import numpy as np
 from typing import Optional
 from ..physics.geophysical_models import archie_resistivity, ArchieParams, fluid_resistivity_from_concentration
@@ -10,51 +10,94 @@ class MaterialField:
     All inputs/outputs are Firedrake Functions
     """
     
-    def __init__(self, domain):
+    def __init__(self, domain, function_space):
 
         self.domain = domain
         domain.validate()
         print(domain)
 
-        self.V = FunctionSpace(domain.mesh, "CG", 1)
+        self.V = function_space
+
+        self.domain.prepare_for_symbolic_mode(function_space)
         
     def _compute_field(self, state_functions, property_func):
         """
         Generic spatial mapping: material properties → mesh fields
         
-        Parameters:
-        -----------
-        state_functions : None, Function, or tuple of Functions
-            State variables needed by property_func
-        
-        property_func : callable
-            Extracts property from material:
-            - Static: lambda mat: mat.Ks
-            - Dynamic: lambda mat, p: mat.hydraulic.theta(p)
-            - Multi-state: lambda mat, p, vx, vy: mat.some_property(p, vx, vy)
+        Handles both numeric (fast) and symbolic (tape-preserving) modes
         """
         field = Function(self.V)
-        field_data = field.dat.data
         
-        # Normalize inputs
+        # Normalize state_functions to a list
         if state_functions is None:
-            state_data_list = []
+            state_list = []
         elif isinstance(state_functions, (list, tuple)):
-            state_data_list = [sf.dat.data_ro for sf in state_functions]
+            state_list = list(state_functions)
         else:
-            state_data_list = [state_functions.dat.data_ro]
+            state_list = [state_functions]
         
-        for region_name, material in self.domain.materials.items():
-            mask = self.domain.regions[region_name]
+        # Check if we need symbolic mode
+        # Condition 1: State variables are UFL expressions
+        states_are_symbolic = any(hasattr(sf, "ufl_element") for sf in state_list)
+        
+        # Condition 2: Property values are UFL (test with first material)
+        test_material = list(self.domain.materials.values())[0]
+        test_val = (property_func(test_material, *state_list) if state_list 
+                   else property_func(test_material))
+        property_is_symbolic = (hasattr(test_val, "ufl_element") or 
+                               isinstance(test_val, Constant))
+        
+        symbolic_mode = states_are_symbolic or property_is_symbolic
+        
+        if symbolic_mode:
+            # ========================================
+            # SYMBOLIC PATH: Preserve UFL structure
+            # ========================================
             
-            if not state_data_list:
-                # Static property
-                field_data[mask] = property_func(material)
-            else:
-                # Dynamic property (1 or more states)
-                field_data[mask] = np.vectorize(
-                    lambda *states: property_func(material, *states)
-                )(*[sd[mask] for sd in state_data_list])
+            # Build piecewise expression using region indicators
+            field_expr = Constant(0.0)  # Default value
+            
+            for region_name, material in self.domain.materials.items():
+                # Get pre-computed indicator Function
+                indicator = self.domain.region_indicators[region_name]
+                
+                # Compute property value for this material
+                if state_list:
+                    val = property_func(material, *state_list)
+                else:
+                    val = property_func(material)
+                
+                # Build: field_expr = indicator * val + (1 - indicator) * field_expr
+                # This accumulates each region's contribution
+                field_expr = indicator * val + (1.0 - indicator) * field_expr
+            
+            # Assign the complete symbolic expression ONCE
+            field.interpolate(field_expr)
+        
+        else:
+            # ========================================
+            # NUMERIC PATH: Fast numpy operations
+            # ========================================
+            field_data = field.dat.data
+            
+            if state_list:
+                # Extract numpy arrays from Functions
+                state_data_list = [
+                    sf.dat.data_ro if isinstance(sf, Function) else sf 
+                    for sf in state_list
+                ]
+            
+            for region_name, material in self.domain.materials.items():
+                mask = self.domain.regions[region_name]
+                
+                if not state_list:
+                    # Static property
+                    field_data[mask] = property_func(material)
+                else:
+                    # Dynamic property (depends on state)
+                    field_data[mask] = np.vectorize(
+                        lambda *states: float(property_func(material, *states))
+                    )(*[sd[mask] for sd in state_data_list])
         
         return field
 

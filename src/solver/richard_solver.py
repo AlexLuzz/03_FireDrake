@@ -6,12 +6,12 @@ from firedrake import (
 from ..tools.tools import loading_bar
 
 class RichardsSolver:
-    def __init__(self, field_map, source_scenario, bc_manager, config, verbose=True):
+    def __init__(self, V, field_map, source_scenario, bc_manager, config, verbose=True):
         
         self.field_map = field_map
         self.domain = self.field_map.domain
         self.mesh = self.domain.mesh
-        self.V = self.field_map.V
+        self.V = V
         
         self.source_scenario = source_scenario
         self.bc_manager = bc_manager

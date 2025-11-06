@@ -12,18 +12,23 @@ from src import *
 from firedrake import *
 from firedrake.adjoint import *
 from datetime import datetime, timedelta
-from pyadjoint import get_working_tape, continue_annotation, AdjFloat
+from pyadjoint import get_working_tape, continue_annotation
 from typing import Dict
 
-def your_simulation(param_constants: Dict[str, Constant]) -> ProbeManager:
+def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeManager:
     """
     Richards simulation with loss computed during solve (stays on tape!)
+    
+    Args:
+        param_constants: Dictionary of scalar Functions (R space) for parameters
+        domain: Domain object with mesh
+        V: Function space for pressure field
     """
     config = SimulationConfig(
         name="Adjoint_Optimization",
         start_datetime=generic_param['start_datetime'],
         end_datetime=generic_param['end_datetime'],
-        dt_td=timedelta(hours=6)
+        dt_td=timedelta(hours=generic_param['timestep_hours'])
     )
     
     rain_zones = [
@@ -35,28 +40,27 @@ def your_simulation(param_constants: Dict[str, Constant]) -> ProbeManager:
         from_date=config.start_datetime,
         to_date=config.end_datetime,
         meteostat_station='SOK6B',
-        meteostat_agg_hours=6,
+        meteostat_agg_hours=generic_param['timestep_hours'],
         zones=rain_zones
     )
 
-    domain = Domain(nx=60, ny=30, Lx=20.0, Ly=5.0)
-
     domain.assign("base", Material.till(
-        theta_r=0.02,
-        theta_s=0.14,
-        alpha=0.94,
-        n=2.3579,
+        theta_r=param_constants['theta_r_till'],   # default: 0.02
+        theta_s=param_constants['theta_s_till'],   # default: 0.14
+        alpha=param_constants['alpha_till'],     # default: 0.9399
+        n=param_constants['n_till'],       # default: 2.3579
         Ks=param_constants['Ks_till']
     ))
-    field_map = MaterialField(domain)
+    field_map = MaterialField(domain, V)
 
     bc_manager = BoundaryConditionManager(
-        field_map.V, left_wt=1.2, right_wt=1.5
+        V, left_wt=1.2, right_wt=1.5
     )
     
     probe_manager = ProbeManager(domain.mesh)
 
     solver = RichardsSolver(
+        V=V,
         field_map=field_map,
         source_scenario=rain_source,
         bc_manager=bc_manager,
@@ -111,21 +115,23 @@ def main(generic_param):
     
     initial_params = {
         # Till soil parameters (5)
-        #'theta_r_till': 0.02,
-        #'theta_s_till': 0.14,
-        #'alpha_till': 0.9399,
-        #'n_till': 2.3579,
+        'theta_r_till': 0.02,
+        'theta_s_till': 0.14,
+        'alpha_till': 0.9399,
+        'n_till': 2.3579,
         'Ks_till': 9e-6,
     }
     
     print(f"   ✓ Total parameters to optimize: {len(initial_params)}")
     
     # -------------------------------------------------------------------------
-    # STEP 3: Create parameter controls (Firedrake Constants)
+    # STEP 3: Create parameter controls (Firedrake Functions on R space)
     # -------------------------------------------------------------------------
     print("\n[STEP 3] Creating parameter controls...")
-    controls_dict, param_constants = create_parameter_controls(initial_params)
-    print(f"   ✓ Created {len(controls_dict)} Firedrake Controls")
+    # Create a simple mesh for the R space (we'll reuse for simulation)
+    domain = Domain(nx=60, ny=30, Lx=20.0, Ly=5.0)
+    controls_dict, param_functions = create_parameter_controls(initial_params, domain.mesh)
+    print(f"   ✓ Created {len(controls_dict)} scalar Function controls (R space)")
     
     # -------------------------------------------------------------------------
     # STEP 4: Run forward simulation WITH ANNOTATION
@@ -133,9 +139,11 @@ def main(generic_param):
     print("\n[STEP 4] Running forward simulation with adjoint annotation...")
     print("   (This may take a few minutes...)")
     
+    # Create function space for pressure
+    V = FunctionSpace(domain.mesh, "CG", 1, name="pressure")
+    
     # CRITICAL: Enable annotation to record operations on the tape!
-    get_working_tape().progress_bar = ProgressBar()
-    probe_manager = your_simulation(param_constants)  # Returns ProbeManager!
+    probe_manager = your_simulation(param_functions, domain, V)  # Returns ProbeManager!
     
     n_blocks = len(get_working_tape().get_blocks())
     print(f"   ✓ Adjoint tape recorded {n_blocks} operations")
@@ -147,7 +155,7 @@ def main(generic_param):
     
     bounds = create_tight_bounds(initial_params, variation_pct=20.0)
     optimizer = AdjointOptimizer(observations, bounds)
-    optimizer.setup_optimization(probe_manager, controls_dict, initial_params)
+    optimizer.setup_optimization(probe_manager, controls_dict, param_functions, initial_params)
     
     # -------------------------------------------------------------------------
     # STEP 6: Run optimization!
@@ -159,10 +167,9 @@ def main(generic_param):
     print()
     
     optimized_params = optimizer.optimize(
-        #method='L-BFGS-B',
-        method='SLSQP',
-        maxiter=3,      # Start with 10, increase to 50 for production
-        gtol=1e-3,
+        method='L-BFGS-B',
+        maxiter=20,     
+        gtol=5e-4,
         verbose=True
     )
     
@@ -186,6 +193,7 @@ def main(generic_param):
         observations=observations,
         initial_params=initial_params,
         optimized_params=optimized_params,
+        mesh=domain.mesh,
         save_path=save_path
     )
     
@@ -196,6 +204,7 @@ def main(generic_param):
         forward_model_func=your_simulation,
         observations=observations,
         optimized_params=optimized_params,
+        mesh=domain.mesh,
         save_path=residual_path
     )
     
@@ -207,6 +216,7 @@ def main(generic_param):
         forward_model_func=your_simulation,
         observations=observations,
         optimized_params=optimized_params,
+        mesh=domain.mesh,
         n_runs=3
     )
     
@@ -224,8 +234,8 @@ if __name__ == "__main__":
     # Simulation period
     generic_param = {
         'start_datetime': datetime(2024, 4, 15),
-        'end_datetime': datetime(2024, 5, 15),
-        'timestep_hours': 6,
+        'end_datetime': datetime(2024, 4, 30),
+        'timestep_hours': 12,
     }
     
     # Run optimization
