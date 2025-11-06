@@ -32,8 +32,8 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
     )
     
     rain_zones = [
-        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 'multiplier': 1.0},
-        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': 6.0},
+        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 'multiplier': param_constants['rain_mult_0']},
+        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': param_constants['rain_mult_1']},
     ]
     
     rain_source = rainfall_scenario(
@@ -44,18 +44,32 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
         zones=rain_zones
     )
 
+    domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
+
     domain.assign("base", Material.till(
-        theta_r=param_constants['theta_r_till'],   # default: 0.02
-        theta_s=param_constants['theta_s_till'],   # default: 0.14
-        alpha=param_constants['alpha_till'],     # default: 0.9399
-        n=param_constants['n_till'],       # default: 2.3579
+        theta_r=param_constants['theta_r_till'],
+        theta_s=param_constants['theta_s_till'],
+        alpha=param_constants['alpha_till'],
+        n=param_constants['n_till'],
         Ks=param_constants['Ks_till']
     ))
+
+    domain.assign("GI", Material.terreau(
+        theta_r=param_constants['theta_r_terreau'],
+        theta_s=param_constants['theta_s_terreau'],
+        alpha=param_constants['alpha_terreau'],
+        n=param_constants['n_terreau'],
+        Ks=param_constants['Ks_terreau']
+    ))
+
     field_map = MaterialField(domain, V)
 
-    bc_manager = BoundaryConditionManager(
-        V, left_wt=1.2, right_wt=1.5
-    )
+    bc_manager = BoundaryConditionManager(V, 
+                                          left_wt=param_constants['wt_left'], 
+                                          right_wt=param_constants['wt_right'],
+                                          #left_wt=0.8, 
+                                          #right_wt=1.5,
+                                    time_converter=config.time_converter)
     
     probe_manager = ProbeManager(domain.mesh)
 
@@ -122,6 +136,37 @@ def main(generic_param):
         'alpha_till': 0.9399,
         'n_till': 2.3579,
         'Ks_till': 9e-6,
+        
+        # Terreau soil parameters (5)
+        'theta_r_terreau': 0.02,
+        'theta_s_terreau': 0.43,
+        'alpha_terreau': 1.1670,
+        'n_terreau': 2.1052,
+        'Ks_terreau': 4e-5,
+        
+        # Rain multipliers (2)
+        'rain_mult_0': 1.0,
+        'rain_mult_1': 6.0,
+
+        # Water table conditions (3)
+        'wt_left': 0.8,
+        'wt_right': 1.5,
+    }
+    
+    realistic_bounds = {
+    # Till (clayey soil) - tight bounds based on literature
+    'theta_r_till': (0.01, 0.05),      # Residual moisture
+    'theta_s_till': (0.10, 0.20),      # Saturated (clay is 0.1-0.2)
+    'Ks_till': (5e-7, 5e-5),           # m/s (clay: 1e-7 to 1e-5)
+    
+    # Terreau (organic soil) - wider bounds
+    'theta_r_terreau': (0.01, 0.10),   # Can retain more
+    'theta_s_terreau': (0.35, 0.55),   # High porosity         
+    'Ks_terreau': (5e-6, 5e-4),       # m/s (much more permeable)
+    
+    # Rain multipliers - based on your system
+    'rain_mult_0': (0.5, 2.0),         # ±100% adjustment
+    'rain_mult_1': (2.0, 10.0),        # GI can have higher mult
     }
     
     print(f"   ✓ Total parameters to optimize: {len(initial_params)}")
@@ -154,8 +199,9 @@ def main(generic_param):
     # STEP 5: Setup optimization
     # -------------------------------------------------------------------------
     print("\n[STEP 5] Setting up optimization problem...")
-    
-    bounds = create_tight_bounds(initial_params, variation_pct=20.0)
+
+    bounds = create_tight_bounds(initial_params, variation_pct=30.0,
+                                 custom_bounds=realistic_bounds)
     optimizer = AdjointOptimizer(observations, bounds)
     optimizer.setup_optimization(probe_manager, controls_dict, param_functions, initial_params)
     
@@ -171,7 +217,7 @@ def main(generic_param):
     optimized_params = optimizer.optimize(
         method='L-BFGS-B',
         maxiter=10,     
-        gtol=1e-3,
+        gtol=1e-4,
         verbose=True
     )
     
@@ -225,7 +271,7 @@ def main(generic_param):
         mesh=domain.mesh,
         domain=domain,
         V=V,
-        n_runs=3
+        n_runs=1
     )
     
     print("\n" + "="*70)

@@ -4,12 +4,12 @@
 
     ## High Priority 🔥
     - [ ] Use pyadjoint and code a optimization loop to auto-fit parameters ! (probably doable for richard's) 
-    - [ ] Implement test script with ANALYTICAL solution for validation
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
     - [ ] adaptative timestep
     - [ ] Check ponding problem
 
     ## Medium Priority ⚡
+    - [ ] Implement test script with ANALYTICAL solution for validation
     - [ ] Hybrid display on results, plot water table / rain mm / salt flux
     - [ ] Test SUPG and/or crank nicholson for transport ? 
 
@@ -18,12 +18,14 @@
     - [ ] Track processing time to evaluate what takes time, and ...
 
     ## ULTRA Low Priority 💡
-    - [x-ish] Improve functionSpace and boundary conditions declaration logic - Maybe a manager would clarify and avoid lot of repetitions
+    
     - [ ] Code cleanup
     - [ ] Documentation
     - [ ] Import curves from txt/csv
 
 ## ✅ Completed
+- [x-ish] Improve functionSpace and boundary conditions declaration logic - 
+          Maybe a manager would clarify and avoid lot of repetitions
 - [x] Evaluate real OFFSET for CG LTC probes
 - [x] Implement verbose in the solvers ! (too MANY TEXT)
 - [x] Fit RAF curves to use fast vg params instead

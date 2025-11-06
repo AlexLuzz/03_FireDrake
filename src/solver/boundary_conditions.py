@@ -88,11 +88,23 @@ class BoundaryConditionManager:
         return self.right_wt_0 + self.right_slope * t
     
     def _update(self, t):
-        """Update hydrostatic profiles: h(y) = wt - y"""
+        """Update hydrostatic profiles: h(y) = wt - y, keeping on adjoint tape"""
+        from firedrake import SpatialCoordinate, interpolate
+        
         left_wt = self._get_wt_left(t)
         right_wt = self._get_wt_right(t)
-        self.bc_left.dat.data[:] = left_wt - self.y_coords
-        self.bc_right.dat.data[:] = right_wt - self.y_coords
+        
+        # Use UFL expressions to keep on adjoint tape
+        # left_wt and right_wt can be scalars or Functions (R-space)
+        coords_ufl = SpatialCoordinate(self.mesh)
+        
+        # Create pressure profile expressions: p = wt - y
+        left_pressure_expr = left_wt - coords_ufl[1]
+        right_pressure_expr = right_wt - coords_ufl[1]
+        
+        # Interpolate to boundary Functions (stays on tape!)
+        self.bc_left.interpolate(left_pressure_expr)
+        self.bc_right.interpolate(right_pressure_expr)
     
     def get_dirichlet_bcs(self, t=0.0):
         """Get boundary conditions at time t"""

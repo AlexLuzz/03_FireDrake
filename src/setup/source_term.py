@@ -210,9 +210,10 @@ class SourceScenario:
             
             for zone in event.zones:
                 zone_flux = rate * zone.multiplier * self.rate_unit_conversion
+                # Don't wrap in Constant if already a UFL expression
                 flux = conditional(
                     zone.ufl_condition(coords),
-                    Constant(zone_flux),
+                    zone_flux,
                     flux
                 )
         

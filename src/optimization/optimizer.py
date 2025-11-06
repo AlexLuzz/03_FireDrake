@@ -69,23 +69,22 @@ class ParameterBounds:
 
 class AdjointOptimizer:
     """
-    Parameter optimizer using Firedrake adjoint
+    Parameter optimizer using Firedrake adjoint with optional parameter normalization
     
     The key insight: Instead of running simulation many times, we:
-    1. Run simulation ONCE with parameter Constants
+    1. Run simulation ONCE with parameter Functions (R-space)
     2. Build a loss functional that's recorded on the adjoint tape
     3. Use automatic differentiation to compute exact gradients
     4. Optimize using scipy with these gradients
-    
+
     Usage:
-        controls, constants = create_parameter_controls(initial_params)
+        controls, param_functions = create_parameter_controls(initial_params, mesh)
         
         continue_annotation()
-        simulated_data = your_simulation(constants)
+        probe_manager = your_simulation(param_functions, domain, V)
         
         optimizer = AdjointOptimizer(observations, bounds)
-        optimizer.setup_optimization(simulated_data, controls)
-        best = optimizer.optimize()
+        optimizer.setup_optimization(probe_manager, controls, param_functions, initial_params)
     """
     
     def __init__(
@@ -152,6 +151,7 @@ class AdjointOptimizer:
     def _compute_loss_from_functions(self, probe_manager):
         """
         Compute loss using assemble() to get proper OverloadedType
+        Skips first 20% of timesteps to avoid transient phase
         """
         recorded_functions = probe_manager.get_recorded_functions()
         if not recorded_functions:
@@ -165,13 +165,17 @@ class AdjointOptimizer:
         # Accumulate loss as assembled scalars
         total_loss = 0.0  # Start with float
         n_obs = 0
+        
+        print(f"  Loss computation: Using timesteps {cutoff} to {n_times-1} (skipping first {cutoff} transient steps)")
 
         for i, (t, field_name, field_at_probes) in enumerate(recorded_functions):
+            # Skip first 20% (transient phase)
             if i < cutoff:
                 continue
 
             # field_at_probes is Function on VertexOnlyMesh (already includes elevation!)
             # Create observation Function (observations are total head/elevation)
+            # IMPORTANT: Use index i (not i-cutoff) because observations array includes all timesteps
             obs_func = Function(P0)
             obs_func.dat.data[:] = self.observations.values[i, :]
             
@@ -193,22 +197,28 @@ class AdjointOptimizer:
 
         # Assemble symbolic loss at the end
         loss = assemble(Constant(1.0 / float(n_obs)) * total_loss)
+        print(f"  Total observations used: {n_obs} (after cutoff)")
         return loss
     
     def _callback(self, controls_values):
-        """Callback to track optimization progress"""
+        """
+        Callback to track optimization progress
+        
+        Args:
+            controls_values: numpy array of parameter values
+        """
         self.iteration_count += 1
         
-        # Convert numpy array to list
+        # Convert numpy array to array
         if hasattr(controls_values, 'tolist'):
-            values_list = controls_values.tolist()
+            values_array = np.array(controls_values.tolist())
         else:
-            values_list = list(controls_values)
+            values_array = np.array(list(controls_values))
         
         # Update Function objects with new values and pass to ReducedFunctional
         # ReducedFunctional expects Function objects, not scalar values
         funcs_list = []
-        for func, val in zip(self.control_functions, values_list):
+        for func, val in zip(self.control_functions, values_array):
             # Create a copy and assign the new scalar value
             func_copy = func.copy(deepcopy=True)
             func_copy.dat.data[:] = val
@@ -218,11 +228,25 @@ class AdjointOptimizer:
         current_loss = float(self.reduced_functional(funcs_list))
         self.loss_history.append(current_loss)
         
-        # Store parameters
+        # Store parameters (in physical units)
         params = {name: float(val) 
-                 for name, val in zip(self.control_names, values_list)}
+                 for name, val in zip(self.control_names, values_array)}
         self.param_history.append(params)
         
+        # Add gradient monitoring
+        grad = self.reduced_functional.derivative()
+        grad_norms = [float(g.dat.data[0]) if hasattr(g, 'dat') else float(g) 
+                    for g in grad]
+        
+        print(f"Iteration {self.iteration_count}: Loss = {current_loss:.6e}")
+        print(f"  Max gradient: {max(abs(g) for g in grad_norms):.2e}")
+        
+        # Check if stuck
+        if len(self.loss_history) > 3:
+            recent_improvement = (self.loss_history[-4] - self.loss_history[-1]) / self.loss_history[-4]
+            if recent_improvement < 0.001:  # Less than 0.1% over 3 iterations
+                print("  ⚠️  WARNING: Optimization appears stuck!")
+
         print(f"Iteration {self.iteration_count}: Loss = {current_loss:.6e}")
     
     def optimize(
@@ -255,9 +279,11 @@ class AdjointOptimizer:
         if self.reduced_functional is None:
             raise RuntimeError("Must call setup_optimization() first!")
         
+        
         # Get bounds in the SAME ORDER as self.control_names
         min_vals = [self.bounds.bounds[name][0] for name in self.control_names]
         max_vals = [self.bounds.bounds[name][1] for name in self.control_names]
+    
         # Pyadjoint expects:
         #  - single parameter: [lower, upper]
         #  - multiple parameters: [[lower1, ...], [upper1, ...]]
@@ -267,13 +293,13 @@ class AdjointOptimizer:
             bounds_list = [min_vals, max_vals]
 
         # DEBUG: Print what we're passing
-        print("\n=== DEBUG BOUNDS ===")
+        print("\n=== OPTIMIZATION SETUP ===")
         print(f"Number of controls: {len(self.controls)}")
         print(f"Control names: {self.control_names}")
-        print(f"Min vals ({len(min_vals)}): {min_vals}")
-        print(f"Max vals ({len(max_vals)}): {max_vals}")
-        print(f"Bounds list: {bounds_list}")
-        print("===================\n")
+        print(f"Min vals: {min_vals}")
+        print(f"Max vals: {max_vals}")
+        print(f"Bounds for optimizer: {bounds_list}")
+        print("=========================\n")
         
         # Reset iteration counter
         self.iteration_count = 0
@@ -287,7 +313,9 @@ class AdjointOptimizer:
             options={
                 'maxiter': maxiter,
                 'gtol': gtol,
-                'disp': verbose
+                'disp': verbose,
+                'ftol': 1e-6,
+                'maxfun': 100,
             }
         )
         
@@ -348,14 +376,17 @@ def create_parameter_controls(params: Dict[str, float], mesh) -> Tuple[Dict[str,
 def create_tight_bounds(
     base_params: Dict[str, float],
     variation_pct: float = 20.0,
+    custom_bounds: Optional[Dict[str, tuple]] = None,
     absolute_mins: Optional[Dict[str, float]] = None
 ) -> ParameterBounds:
     """
-    Create bounds around base parameter estimates
+    Create bounds with custom overrides for specific parameters
     
     Args:
         base_params: Your best parameter estimates
-        variation_pct: Allowed variation percentage (default ±20%)
+        variation_pct: Default variation percentage (±20%)
+        custom_bounds: Override bounds for specific parameters
+                      e.g., {'Ks_till': (1e-7, 5e-5), 'n_till': (1.2, 2.5)}
         absolute_mins: Optional absolute minimum values (e.g., {'n': 1.05})
     
     Returns:
@@ -364,11 +395,17 @@ def create_tight_bounds(
     bounds_dict = {}
     
     for name, base_val in base_params.items():
-        variation = variation_pct / 100.0
-        min_val = base_val * (1 - variation)
-        max_val = base_val * (1 + variation)
+        # Check if custom bounds are provided for this parameter
+        if custom_bounds and name in custom_bounds:
+            min_val, max_val = custom_bounds[name]
+            print(f"   Using custom bounds for {name}: [{min_val:.2e}, {max_val:.2e}]")
+        else:
+            # Use percentage variation
+            variation = variation_pct / 100.0
+            min_val = base_val * (1 - variation)
+            max_val = base_val * (1 + variation)
         
-        # Apply absolute constraints
+        # Apply absolute constraints (if any)
         if absolute_mins and name in absolute_mins:
             min_val = max(absolute_mins[name], min_val)
         

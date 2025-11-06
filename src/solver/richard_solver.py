@@ -24,9 +24,19 @@ class RichardsSolver:
         self._set_initial_conditions()
     
     def _set_initial_conditions(self):
-        coords = self.mesh.coordinates.dat.data_ro
+        """Set initial hydrostatic pressure profile"""
+        from firedrake import SpatialCoordinate, interpolate
+        
         water_table = self.bc_manager.left_wt_0
-        self.p_n.dat.data[:] = water_table - coords[:, 1]
+        coords_ufl = SpatialCoordinate(self.mesh)
+        
+        # Use UFL expression to keep on adjoint tape
+        # water_table can be either a scalar or a Function (R-space)
+        # UFL will handle both cases correctly
+        pressure_expr = water_table - coords_ufl[1]
+        
+        # Interpolate keeps the dependency on water_table in the tape
+        self.p_n.interpolate(pressure_expr)
     
     def solve_timestep(self, t: float):
         # Update coefficients from current pressure
