@@ -48,6 +48,9 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
 
     domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
 
+    # Convert Ks from log-space to physical space using UFL exp()
+    from firedrake import exp
+    
     domain.assign("base", Material.till(
         theta_r=param_constants['theta_r_till'],
         theta_s=param_constants['theta_s_till'],
@@ -61,7 +64,7 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
         theta_s=param_constants['theta_s_terreau'],
         alpha=param_constants['alpha_terreau'],
         n=param_constants['n_terreau'],
-        Ks=param_constants['Ks_terreau']
+        Ks=param_constants['Ks_terreau'] 
     ))
 
     field_map = MaterialField(domain, V)
@@ -137,35 +140,39 @@ def main(generic_param):
         'theta_s_till': 0.14,
         'alpha_till': 0.9399,
         'n_till': 2.3579,
-        'Ks_till': 9e-6,  # Natural log for UFL exp()
+        'Ks_till': float(np.log10(9e-6)),
+        #'Ks_till': 9e-6,
         
         # Terreau soil parameters (5)
         'theta_r_terreau': 0.02,
         'theta_s_terreau': 0.43,
         'alpha_terreau': 1.1670,
         'n_terreau': 2.1052,
-        'Ks_terreau': 4e-5,  # Natural log for UFL exp()
-        
+        'Ks_terreau': float(np.log10(4e-5)),
+        #'Ks_terreau': 4e-5,
+
         # Rain multipliers (2)
         'rain_mult_0': 1.0,
         'rain_mult_1': 6.0,
 
         # Water table conditions (3)
-        'wt_left': 0.8,
+        'wt_left': 0.5,
         'wt_right': 1.5,
     }
     
     realistic_bounds = {
     # Till (clayey soil) - tight bounds based on literature
-    'theta_r_till': (0.01, 0.05),      # Residual moisture
+    'theta_r_till': (0.01, 0.1),      # Residual moisture
     'theta_s_till': (0.10, 0.20),      # Saturated (clay is 0.1-0.2)
-    'Ks_till':  (5e-7, 5e-5), 
-    
+    'Ks_till':  (float(np.log10(5e-7)), float(np.log10(1e-4))),
+    #'Ks_till':  (5e-7, 1e-4),
+
     # Terreau (organic soil) - wider bounds
     'theta_r_terreau': (0.01, 0.10),   # Can retain more
     'theta_s_terreau': (0.35, 0.55),   # High porosity         
-    'Ks_terreau': (5e-6, 5e-4),  # Natural log bounds
-    
+    'Ks_terreau': (float(np.log10(5e-6)), float(np.log10(5e-3))),
+    #'Ks_terreau': (5e-6, 5e-3),
+
     # Rain multipliers - based on your system
     'rain_mult_0': (0.5, 2.0),         # ±100% adjustment
     'rain_mult_1': (2.0, 10.0),        # GI can have higher mult
@@ -218,7 +225,7 @@ def main(generic_param):
     
     optimized_params = optimizer.optimize(
         method='L-BFGS-B',
-        maxiter=4,     
+        maxiter=10,     
         gtol=1e-4,
         verbose=True
     )

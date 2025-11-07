@@ -152,13 +152,10 @@ class AdjointOptimizer:
         # Callback for monitoring
         def callback(controls_values):
             self.iteration_count += 1
-            
-            print(f"Callback values type: {type(controls_values)}")
-            print(f"Length of controls_values: {len(controls_values)}")
-            print(f"Expected controls: {len(self.controls)}")
 
-            # Evaluate loss
-            current_loss = self.loss_history[-1] if self.loss_history else np.nan
+            # Evaluate loss with current control values
+            #current_loss = float(self.reduced_functional(controls_values))
+            current_loss = float(self.loss_history[-1]) if self.loss_history else np.nan
             self.loss_history.append(current_loss)
             
             # Get gradients and store params
@@ -199,7 +196,8 @@ class AdjointOptimizer:
                     'gtol': gtol,
                     'ftol': 1e-5,
                     'maxls': 100,  # More line search steps
-                    'maxcor': 20
+                    'maxcor': 20,
+                    'disp': verbose
                 }
             )
             

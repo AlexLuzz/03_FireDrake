@@ -44,7 +44,7 @@ import numpy as np
 from .curve_tools import CurveData, CurveInterpolator
 from scipy.optimize import differential_evolution, minimize
 from typing import Literal, Optional, Dict, Tuple
-from firedrake import Constant, conditional, min_value, max_value
+from firedrake import conditional, min_value, max_value, Constant
 
 # ==============================================
 # ABSTRACT BASE CLASS
@@ -241,9 +241,12 @@ class VanGenuchtenModel(HydraulicModel):
         K(p): Hydraulic conductivity [m/s]
         K(p) = k_r(p) * K_s
         """
-        return self._kr(pressure) * Ks
-    
-            
+        kr = self._kr(pressure)
+        if hasattr(kr, 'ufl_element'):
+            return kr * Constant(10)**Ks
+        else:
+            return kr * Ks
+
     def _Se(self, pressure):
         """
         S_e(p): Effective saturation [-]
@@ -255,7 +258,6 @@ class VanGenuchtenModel(HydraulicModel):
             alpha = self.params.alpha
             n = self.params.n
             m = self.params.m
-
             Se = 1.0 / (1.0 + (alpha * abs(pressure))**n)**m
             Se_smooth = conditional(
                 pressure >= eps,
