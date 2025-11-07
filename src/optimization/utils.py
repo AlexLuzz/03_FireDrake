@@ -5,10 +5,10 @@ Plotting, analysis, and result visualization
 
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Dict, Optional
-from .optimizer import AdjointOptimizer, create_parameter_controls, ObservationData
-from pyadjoint import pause_annotation, continue_annotation
-
+from typing import Dict, Optional, Tuple, List
+from .optimizer import AdjointOptimizer, ObservationData, create_parameter_controls
+from firedrake import Function, FunctionSpace, exp, ln, interpolate
+from pyadjoint import pause_annotation, continue_annotation, Control
 
 def extract_probe_data(probe_manager, field_name: str = 'water_table'):
     """

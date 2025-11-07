@@ -21,6 +21,8 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
     
     Args:
         param_constants: Dictionary of scalar Functions (R space) for parameters
+                        NOTE: Ks_till and Ks_terreau are stored in ln() space!
+                              Use exp() to convert to physical values.
         domain: Domain object with mesh
         V: Function space for pressure field
     """
@@ -135,14 +137,14 @@ def main(generic_param):
         'theta_s_till': 0.14,
         'alpha_till': 0.9399,
         'n_till': 2.3579,
-        'Ks_till': 9e-6,
+        'Ks_till': 9e-6,  # Natural log for UFL exp()
         
         # Terreau soil parameters (5)
         'theta_r_terreau': 0.02,
         'theta_s_terreau': 0.43,
         'alpha_terreau': 1.1670,
         'n_terreau': 2.1052,
-        'Ks_terreau': 4e-5,
+        'Ks_terreau': 4e-5,  # Natural log for UFL exp()
         
         # Rain multipliers (2)
         'rain_mult_0': 1.0,
@@ -157,29 +159,28 @@ def main(generic_param):
     # Till (clayey soil) - tight bounds based on literature
     'theta_r_till': (0.01, 0.05),      # Residual moisture
     'theta_s_till': (0.10, 0.20),      # Saturated (clay is 0.1-0.2)
-    'Ks_till': (5e-7, 5e-5),           # m/s (clay: 1e-7 to 1e-5)
+    'Ks_till':  (5e-7, 5e-5), 
     
     # Terreau (organic soil) - wider bounds
     'theta_r_terreau': (0.01, 0.10),   # Can retain more
     'theta_s_terreau': (0.35, 0.55),   # High porosity         
-    'Ks_terreau': (5e-6, 5e-4),       # m/s (much more permeable)
+    'Ks_terreau': (5e-6, 5e-4),  # Natural log bounds
     
     # Rain multipliers - based on your system
     'rain_mult_0': (0.5, 2.0),         # ±100% adjustment
     'rain_mult_1': (2.0, 10.0),        # GI can have higher mult
     }
-    
+
     print(f"   ✓ Total parameters to optimize: {len(initial_params)}")
     
     # -------------------------------------------------------------------------
-    # STEP 3: Create parameter controls (Firedrake Functions on R space)
+    # STEP 3: Create domain and parameter controls
     # -------------------------------------------------------------------------
     print("\n[STEP 3] Creating parameter controls...")
-    # Create a simple mesh for the R space (we'll reuse for simulation)
-    domain = Domain(nx=60, ny=30, Lx=20.0, Ly=5.0)
+    domain = Domain(nx=60, ny=30, Lx=20.0, Ly=5.0)    
     controls_dict, param_functions = create_parameter_controls(initial_params, domain.mesh)
     print(f"   ✓ Created {len(controls_dict)} scalar Function controls (R space)")
-    
+
     # -------------------------------------------------------------------------
     # STEP 4: Run forward simulation WITH ANNOTATION
     # -------------------------------------------------------------------------
@@ -188,9 +189,9 @@ def main(generic_param):
     
     # Create function space for pressure
     V = FunctionSpace(domain.mesh, "CG", 1, name="pressure")
-    
-    # CRITICAL: Enable annotation to record operations on the tape!
-    probe_manager = your_simulation(param_functions, domain, V)  # Returns ProbeManager!
+
+    # CRITICAL: Enable annotation and pass Functions (not dict of floats!)
+    probe_manager = your_simulation(param_functions, domain, V)
     
     n_blocks = len(get_working_tape().get_blocks())
     print(f"   ✓ Adjoint tape recorded {n_blocks} operations")
@@ -202,6 +203,7 @@ def main(generic_param):
 
     bounds = create_tight_bounds(initial_params, variation_pct=30.0,
                                  custom_bounds=realistic_bounds)
+    
     optimizer = AdjointOptimizer(observations, bounds)
     optimizer.setup_optimization(probe_manager, controls_dict, param_functions, initial_params)
     
@@ -216,7 +218,7 @@ def main(generic_param):
     
     optimized_params = optimizer.optimize(
         method='L-BFGS-B',
-        maxiter=10,     
+        maxiter=4,     
         gtol=1e-4,
         verbose=True
     )

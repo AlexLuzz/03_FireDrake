@@ -484,37 +484,6 @@ class CurveBasedHydraulicModel(HydraulicModel):
         theta = self._theta(pressure)
         Se = (theta - self._theta_r) / (self._theta_s - self._theta_r)
         return max(0.0, min(1.0, Se))
-
-    @classmethod
-    def from_data(cls, 
-                  pressure_heads: np.ndarray,
-                  theta_values: np.ndarray,
-                  kr_values: np.ndarray,
-                  smooth_window: int = 1,
-                  **kwargs):
-        """
-        Create model from custom data arrays
-        
-        Example:
-        --------
-        model = CurveBasedHydraulicModel.from_data(
-            pressure_heads=[-10, -5, -1, 0],
-            theta_values=[0.05, 0.15, 0.30, 0.40],
-            kr_values=[0.001, 0.01, 0.1, 1.0]
-        )
-        """
-        theta_curve = CurveData(pressure_heads, theta_values, 
-                               x_name="pressure", y_name="theta",
-                               units_x="m", units_y="m³/m³")
-        kr_curve = CurveData(pressure_heads, kr_values,
-                            x_name="pressure", y_name="kr",
-                            units_x="m", units_y="-")
-        
-        if smooth_window > 1:
-            theta_curve = theta_curve.smooth(smooth_window)
-            kr_curve = kr_curve.smooth(smooth_window)
-        
-        return cls(theta_curve, kr_curve, **kwargs)
     
     def fit_van_genuchten(self, 
                             method: Literal['minimize', 'differential_evolution'] = 'minimize',

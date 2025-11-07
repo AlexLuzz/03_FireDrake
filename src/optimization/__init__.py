@@ -4,9 +4,9 @@ from .utils import (plot_optimization_results, print_parameter_comparison,
                     )
 
 __all__ = [
-    "ObservationData",  
-    "ParameterBounds",
+    "ObservationData",
     "AdjointOptimizer",
+    "ParameterBounds",
     "create_tight_bounds",
     "create_parameter_controls",
     
