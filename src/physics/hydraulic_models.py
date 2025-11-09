@@ -44,7 +44,7 @@ import numpy as np
 from .curve_tools import CurveData, CurveInterpolator
 from scipy.optimize import differential_evolution, minimize
 from typing import Literal, Optional, Dict, Tuple
-from firedrake import conditional, min_value, max_value, Constant
+from firedrake import conditional, min_value, max_value
 
 # ==============================================
 # ABSTRACT BASE CLASS

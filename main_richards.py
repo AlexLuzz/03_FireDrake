@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 from firedrake import FunctionSpace
+from pyadjoint import pause_annotation
 from src import *
+
+pause_annotation()
 
 def main():
     """Main simulation with new architecture"""
@@ -8,7 +11,7 @@ def main():
     # 1. CONFIGURATION
     # ==========================================
     config = SimulationConfig(
-        name="Datetime_Duration",
+        name="Test",
         start_datetime=datetime(2024, 4, 15),
         end_datetime=datetime(2024, 5, 30),
         dt_td=timedelta(hours=6)
@@ -26,11 +29,11 @@ def main():
         from_date=config.start_datetime,
         to_date=config.end_datetime,
         # From CSV file (need to specify path and rain unit)
-        #csv_path=config.data_input_dir / "BB_METEO.csv",
-        #rain_unit="mm/day",
+        csv_path=config.data_input_dir / "BB_METEO.csv",
+        rain_unit="mm/day",
         # From Meteostat (uncomment to use)
-        meteostat_station='SOK6B',
-        meteostat_agg_hours=6,
+        #meteostat_station='SOK6B',
+        #meteostat_agg_hours=6,
         zones=rain_zones
     )
 
@@ -38,7 +41,7 @@ def main():
     # ==========================================
     # 3. GEOMETRY (Domain - pure geometry)
     # ==========================================
-    domain = Domain(nx=80, ny=40, Lx=20.0, Ly=5.0)
+    domain = Domain(nx=60, ny=30, Lx=20.0, Ly=5.0)
     domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
     
     # ==========================================
@@ -50,16 +53,19 @@ def main():
     # ==========================================
     # 5. MAPPING (connect materials to domain)
     # ==========================================
-    V = FunctionSpace(domain.mesh, "CG", 1)
+    V = FunctionSpace(domain.mesh, "CG", 1, name="pressure")
     field_map = MaterialField(domain, V)
     
     # ==========================================
     # 7. BOUNDARY CONDITIONS
     # ==========================================
-    bc_manager = BoundaryConditionManager(V, left_wt=0.6, right_wt=1.5,
-                                    left_trend=(config.end_datetime, 0.5),
-                                    right_trend=(config.end_datetime, 1.1),
-                                    time_converter=config.time_converter)
+    bc_manager = BoundaryConditionManager(V, 
+                                          left_wt=1.2, 
+                                          right_wt=1.2,
+                                          #left_trend=(config.end_datetime, 0.5),
+                                          #right_trend=(config.end_datetime, 1.1),
+                                          time_converter=config.time_converter
+                                          )
 
     # ==========================================
     # 8. MONITORING

@@ -103,7 +103,7 @@ def main(generic_param):
     
     LTC_data = load_measured_data(
         start_datetime=generic_param['start_datetime'],
-        end_datetime=generic_param['end_datetime'], # + timedelta(hours=6)
+        end_datetime=generic_param['end_datetime'] + timedelta(hours=6), # + timedelta(hours=6)
         time_converter=TimeConverter(generic_param['start_datetime']),
         align=True,
         align_freq=generic_param['timestep_hours']
@@ -136,7 +136,6 @@ def main(generic_param):
         'alpha_till': 0.9399,
         'n_till': 2.3579,
         'Ks_till': float(np.log10(9e-6)),
-        #'Ks_till': 9e-6,
         
         # Terreau soil parameters (5)
         'theta_r_terreau': 0.02,
@@ -144,29 +143,26 @@ def main(generic_param):
         'alpha_terreau': 1.1670,
         'n_terreau': 2.1052,
         'Ks_terreau': float(np.log10(4e-5)),
-        #'Ks_terreau': 4e-5,
 
         # Rain multipliers (2)
-        #'rain_mult_0': 1.0,
-        #'rain_mult_1': 6.0,
+        'rain_mult_0': 1.0,
+        'rain_mult_1': 6.0,
 
         # Water table conditions (3)
-        #'wt_left': 0.5,
-        #'wt_right': 1.5,
+        'wt_left': 0.5,
+        'wt_right': 1.5,
     }
     
     realistic_bounds = {
     # Till (clayey soil) - tight bounds based on literature
     'theta_r_till': (0.01, 0.10),      # Residual moisture
-    'theta_s_till': (0.10, 0.22),      # Saturated (clay is 0.1-0.2)
+    'theta_s_till': (0.12, 0.22),      # Saturated (clay is 0.1-0.2)
     'Ks_till':  (float(np.log10(1e-7)), float(np.log10(1e-4))),
-    #'Ks_till':  (1e-8, 1e-3),
 
     # Terreau (organic soil) - wider bounds
     'theta_r_terreau': (0.01, 0.2),   # Can retain more
     'theta_s_terreau': (0.35, 0.55),   # High porosity         
     'Ks_terreau': (float(np.log10(1e-6)), float(np.log10(1e-4))),
-    #'Ks_terreau': (5e-7, 1e-2),
     }
 
     print(f"   ✓ Total parameters to optimize: {len(initial_params)}")
@@ -247,7 +243,7 @@ def main(generic_param):
         V=V,
         save_path=save_path
     )
-    
+    """
     # Residual analysis
     residual_path = f'residual_analysis_{datetime.now().strftime("%m%d_%H%M")}.png'
     plot_residual_analysis(
@@ -281,16 +277,16 @@ def main(generic_param):
     print(f"Results saved to:")
     print(f"  - {save_path}")
     print(f"  - {residual_path}")
-    
+    """
     return optimized_params, optimizer
-
+    
 
 if __name__ == "__main__":
     # Simulation period
     generic_param = {
         'start_datetime': datetime(2024, 4, 15),
-        'end_datetime': datetime(2024, 5, 15),
-        'timestep_hours': 12,
+        'end_datetime': datetime(2024, 6, 30),
+        'timestep_hours': 6,
     }
     
     # Run optimization
