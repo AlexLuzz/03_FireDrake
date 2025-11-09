@@ -3,7 +3,6 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [ ] Use pyadjoint and code a optimization loop to auto-fit parameters ! (probably doable for richard's) 
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
     - [ ] adaptative timestep
     - [ ] Check ponding problem
@@ -18,12 +17,12 @@
     - [ ] Track processing time to evaluate what takes time, and ...
 
     ## ULTRA Low Priority 💡
-    
     - [ ] Code cleanup
     - [ ] Documentation
     - [ ] Import curves from txt/csv
 
 ## ✅ Completed
+- [x] Use pyadjoint and code a optimization loop to auto-fit parameters ! (probably doable for richard's) 
 - [x-ish] Improve functionSpace and boundary conditions declaration logic - 
           Maybe a manager would clarify and avoid lot of repetitions
 - [x] Evaluate real OFFSET for CG LTC probes

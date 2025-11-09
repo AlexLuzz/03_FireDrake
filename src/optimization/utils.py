@@ -7,7 +7,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, Optional, Tuple, List
 from .optimizer import AdjointOptimizer, ObservationData, create_parameter_controls
-from firedrake import Function, FunctionSpace, exp, ln, interpolate
 from pyadjoint import pause_annotation, continue_annotation, Control
 
 def extract_probe_data(probe_manager, field_name: str = 'water_table'):
@@ -210,50 +209,45 @@ def plot_optimization_results(
     print("\n" + "="*70)
 
 
-def print_parameter_comparison(
-    optimized: Dict[str, float],
-    initial: Dict[str, float],
-    bounds: Optional[Dict[str, tuple]] = None
-):
+def print_parameter_comparison(optimized, initial, bounds):
     """
-    Print formatted comparison of parameter values
-    
-    Args:
-        optimized: Optimized parameters
-        initial: Initial parameters
-        bounds: Optional bounds dict {name: (min, max)}
+    Print table comparing initial vs optimized parameters with robust bound status.
     """
-    print("\n" + "="*70)
-    print("PARAMETER COMPARISON")
-    print("="*70)
-    
-    # Header
-    if bounds:
-        print(f"{'Parameter':<20} {'Initial':>12} {'Optimized':>12} {'Change %':>10} {'Status':>10}")
-    else:
-        print(f"{'Parameter':<20} {'Initial':>12} {'Optimized':>12} {'Change %':>10}")
-    print("-"*70)
-    
-    # Values
+    def near_bound(val: float, lo: float, hi: float, frac: float = 1e-3) -> str:
+        # Ensure ordering
+        if lo > hi:
+            lo, hi = hi, lo
+        width = hi - lo
+        if width <= 0:
+            return "OK"
+        eps = frac * width
+        # Only flag if truly within eps of bound
+        if val <= lo + eps:
+            return "MIN BOUND"
+        if val >= hi - eps:
+            return "MAX BOUND"
+        return "OK"
+
+    header = (
+        "\n" + "="*70 + "\nPARAMETER COMPARISON\n" + "="*70 +
+        f"\n{'Parameter':<20s}{'Initial':>14s}{'Optimized':>14s}{'Change %':>11s}{'Status':>12s}\n" +
+        "-"*70
+    )
+    print(header)
+
     for name in optimized.keys():
-        init_val = initial[name]
-        opt_val = optimized[name]
-        change = ((opt_val - init_val) / init_val) * 100
-        
-        row = f"{name:<20} {init_val:>12.6e} {opt_val:>12.6e} {change:>10.2f}"
-        
-        # Check if at bounds
-        if bounds and name in bounds:
-            min_b, max_b = bounds[name]
-            if abs(opt_val - min_b) / min_b < 0.01:
-                row += f"{'MIN BOUND':>10}"
-            elif abs(opt_val - max_b) / max_b < 0.01:
-                row += f"{'MAX BOUND':>10}"
-            else:
-                row += f"{'OK':>10}"
-        
-        print(row)
-    
+        init_val = initial.get(name, float('nan'))
+        opt_val  = optimized.get(name, float('nan'))
+        denom = init_val if abs(init_val) > 1e-14 else 1.0
+        pct_change = 100.0 * (opt_val - init_val) / denom
+
+        status = "OK"
+        if name in bounds:
+            lo, hi = bounds[name]
+            status = near_bound(opt_val, float(lo), float(hi))
+
+        print(f"{name:<20s}{init_val:>14.6e}{opt_val:>14.6e}{pct_change:>11.2f}{status:>12s}")
+
     print("="*70)
 
 

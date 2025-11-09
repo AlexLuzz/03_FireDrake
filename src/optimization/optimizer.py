@@ -7,6 +7,7 @@ from typing import Dict, Tuple, List, Optional
 from dataclasses import dataclass
 from firedrake import Function, assemble, Constant, FunctionSpace, dx
 from firedrake.adjoint import Control, ReducedFunctional, minimize
+from pyadjoint.reduced_functional_numpy import ReducedFunctionalNumPy
 
 @dataclass
 class ObservationData:
@@ -141,45 +142,38 @@ class AdjointOptimizer:
         print(f"=== DEBUG BOUNDS ===")
         print(f"Number of controls: {len(self.controls)}")
         print(f"Control names: {self.control_names}")
-        print(f"Min vals: {min_vals}")
-        print(f"Max vals: {max_vals}")
-        print(f"Bounds list: {bounds_list}")
+        print(f"Min vals: {[f'{v:.2e}' for v in min_vals]}")
+        print(f"Max vals: {[f'{v:.2e}' for v in max_vals]}")
         print(f"===================\n")
 
         print(f"\n=== OPTIMIZATION ({method}) ===")
         print(f"Max iterations: {maxiter}, gtol: {gtol}")
         
-        # Callback for monitoring
+        rf_np = ReducedFunctionalNumPy(self.reduced_functional)
+
         def callback(controls_values):
             self.iteration_count += 1
-
-            # Evaluate loss with current control values
-            #current_loss = float(self.reduced_functional(controls_values))
-            current_loss = float(self.loss_history[-1]) if self.loss_history else np.nan
+            # Evaluate loss with current vector using the NumPy wrapper
+            current_loss = float(rf_np(controls_values.copy()))
             self.loss_history.append(current_loss)
-            
-            # Get gradients and store params
+
             grads = self.reduced_functional.derivative()
-            grad_info = []
-            params = {}
-            
+            grad_info, params = [], {}
             for i, name in enumerate(self.control_names):
-                grad_val = float(grads[i].dat.data[0]) if hasattr(grads[i], 'dat') else float(grads[i])
-                param_val = float(controls_values[i])  # controls_values should already be numpy array
-                
-                params[name] = param_val
+                grad_val = float(getattr(grads[i], "dat", grads[i]).data[0]) if hasattr(grads[i], "dat") else float(grads[i])
+                params[name] = float(controls_values[i])
                 grad_info.append((name, abs(grad_val)))
-            
             self.param_history.append(params)
             grad_info.sort(key=lambda x: x[1], reverse=True)
-            
+
             print(f"\nIteration {self.iteration_count}: Loss = {current_loss:.6e}")
-            print(f"  Top gradients: {grad_info[0][0]}={grad_info[0][1]:.2e}, "
-                f"{grad_info[1][0]}={grad_info[1][1]:.2e}")
-            print(f"  Loss history: {self.loss_history}")
+            # Print top-K gradients (by magnitude)
+            top_k = min(5, len(grad_info))
+            top_str = ", ".join(f"{n}={g:.2e}" for n, g in grad_info[:top_k])
+            print(f"  Top {top_k} gradients: {top_str}")
             if len(self.loss_history) > 1:
-                rel_change = abs(self.loss_history[-1] - self.loss_history[-2]) / abs(self.loss_history[-2])
-                print(f"  Relative change: {rel_change:.2e}")
+                rel = abs(self.loss_history[-1] - self.loss_history[-2]) / max(abs(self.loss_history[-2]), 1e-16)
+                print(f"  Relative change: {rel:.2e}")
         
         # Initialize optimal_values to None
         optimal_values = None
@@ -190,17 +184,14 @@ class AdjointOptimizer:
                 self.reduced_functional,
                 method=method,
                 bounds=bounds_list,
-                callback=callback if verbose else None,
+                callback=callback,
                 options={
                     'maxiter': maxiter,
                     'gtol': gtol,
                     'ftol': 1e-5,
-                    'maxls': 100,  # More line search steps
-                    'maxcor': 20,
                     'disp': verbose
                 }
             )
-            
             # Extract results successfully
             result = {}
             for i, name in enumerate(self.control_names):
@@ -208,35 +199,31 @@ class AdjointOptimizer:
                 result[name] = val
             
         except Exception as e:
-            print(f"⚠️ Optimization didn't converge: {e}")
-            
-            # Check if we got partial results
-            if optimal_values is not None:
-                # We have some results, try to extract them
-                if not isinstance(optimal_values, list):
-                    print("  Got single value, expected list — wrapping it for safety.")
-                    optimal_values = [optimal_values]
-                
-                result = {}
-                for i, name in enumerate(self.control_names):
-                    try:
-                        val = float(optimal_values[i].dat.data[0]) if hasattr(optimal_values[i], 'dat') else float(optimal_values[i])
-                        result[name] = val
-                    except:
-                        # Fallback to current control value
-                        result[name] = float(self.control_functions[i].dat.data[0])
-            else:
-                # No optimal_values at all, use last parameters from history or current values
-                print("  Returning best parameters found so far...")
-                if self.param_history:
-                    result = self.param_history[-1]
-                else:
-                    result = {name: float(func.dat.data[0]) for name, func in 
-                            zip(self.control_names, self.control_functions)}
+            print(f"\n⚠️  Optimization error: {e}")
+            print("Returning best parameters from callback history.\n")
+
+        # --- TERMINATION DIAGNOSTICS ---
+        print("\n" + "="*40)
+        print("OPTIMIZATION TERMINATION")
+        print("="*40)
         
-        print(f"\n{'='*40}")
+        # --- EXTRACT FINAL PARAMETERS ---
+        # Always use param_history (callback updates it each iteration)
+        # This is safer than trying to parse opt_result which may have various formats
+        if self.param_history:
+            result = self.param_history[-1]  # Last callback params
+            print(f"\nReturning parameters from iteration {len(self.param_history)-1}")
+        else:
+            # Fallback: shouldn't happen if callback ran at least once
+            print("\n⚠️  No parameter history; using initial values")
+            result = {name: float(func.dat.data[0]) 
+                     for name, func in zip(self.control_names, self.control_functions)}
+
         print(f"Final loss: {self.loss_history[-1]:.6e}")
-        print(f"Improvement: {(1 - self.loss_history[-1]/self.loss_history[0])*100:.2f}%")
+        if len(self.loss_history) > 1:
+            improvement = (1 - self.loss_history[-1]/self.loss_history[0]) * 100
+            print(f"Improvement: {improvement:.2f}%")
+        print("="*40)
         
         return result
 

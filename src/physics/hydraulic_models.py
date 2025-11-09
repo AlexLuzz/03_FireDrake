@@ -242,10 +242,9 @@ class VanGenuchtenModel(HydraulicModel):
         K(p) = k_r(p) * K_s
         """
         kr = self._kr(pressure)
-        if hasattr(kr, 'ufl_element'):
-            return kr * Constant(10)**Ks
-        else:
-            return kr * Ks
+        #if hasattr(kr, 'ufl_element'):
+            #return kr * Constant(10)**Ks
+        return kr *  Ks 
 
     def _Se(self, pressure):
         """

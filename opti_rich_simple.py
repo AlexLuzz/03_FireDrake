@@ -12,7 +12,7 @@ from src import *
 from firedrake import *
 from firedrake.adjoint import *
 from datetime import datetime, timedelta
-from pyadjoint import get_working_tape, continue_annotation
+from pyadjoint import *
 from typing import Dict
 
 def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeManager:
@@ -34,8 +34,10 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
     )
     
     rain_zones = [
-        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 'multiplier': param_constants['rain_mult_0']},
-        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': param_constants['rain_mult_1']},
+        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 
+         'multiplier': param_constants['rain_mult_0'] if 'rain_mult_0' in param_constants else 1.0},
+        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 
+         'multiplier': param_constants['rain_mult_1'] if 'rain_mult_1' in param_constants else 6.0},
     ]
     
     rain_source = rainfall_scenario(
@@ -47,16 +49,13 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
     )
 
     domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
-
-    # Convert Ks from log-space to physical space using UFL exp()
-    from firedrake import exp
     
     domain.assign("base", Material.till(
         theta_r=param_constants['theta_r_till'],
         theta_s=param_constants['theta_s_till'],
         alpha=param_constants['alpha_till'],
         n=param_constants['n_till'],
-        Ks=param_constants['Ks_till']
+        Ks=10**param_constants['Ks_till']
     ))
 
     domain.assign("GI", Material.terreau(
@@ -64,16 +63,14 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
         theta_s=param_constants['theta_s_terreau'],
         alpha=param_constants['alpha_terreau'],
         n=param_constants['n_terreau'],
-        Ks=param_constants['Ks_terreau'] 
+        Ks=10**param_constants['Ks_terreau']
     ))
 
     field_map = MaterialField(domain, V)
 
     bc_manager = BoundaryConditionManager(V, 
-                                          left_wt=param_constants['wt_left'], 
-                                          right_wt=param_constants['wt_right'],
-                                          #left_wt=0.8, 
-                                          #right_wt=1.5,
+                                          left_wt=param_constants['wt_left'] if 'wt_left' in param_constants else 0.5, 
+                                          right_wt=param_constants['wt_right'] if 'wt_right' in param_constants else 1.5,
                                     time_converter=config.time_converter)
     
     probe_manager = ProbeManager(domain.mesh)
@@ -111,8 +108,6 @@ def main(generic_param):
         align=True,
         align_freq=generic_param['timestep_hours']
     )
-
-    continue_annotation()
 
     observations = ObservationData(
         times=LTC_data['times'],
@@ -152,30 +147,26 @@ def main(generic_param):
         #'Ks_terreau': 4e-5,
 
         # Rain multipliers (2)
-        'rain_mult_0': 1.0,
-        'rain_mult_1': 6.0,
+        #'rain_mult_0': 1.0,
+        #'rain_mult_1': 6.0,
 
         # Water table conditions (3)
-        'wt_left': 0.5,
-        'wt_right': 1.5,
+        #'wt_left': 0.5,
+        #'wt_right': 1.5,
     }
     
     realistic_bounds = {
     # Till (clayey soil) - tight bounds based on literature
-    'theta_r_till': (0.01, 0.1),      # Residual moisture
-    'theta_s_till': (0.10, 0.20),      # Saturated (clay is 0.1-0.2)
-    'Ks_till':  (float(np.log10(5e-7)), float(np.log10(1e-4))),
-    #'Ks_till':  (5e-7, 1e-4),
+    'theta_r_till': (0.01, 0.10),      # Residual moisture
+    'theta_s_till': (0.10, 0.22),      # Saturated (clay is 0.1-0.2)
+    'Ks_till':  (float(np.log10(1e-7)), float(np.log10(1e-4))),
+    #'Ks_till':  (1e-8, 1e-3),
 
     # Terreau (organic soil) - wider bounds
-    'theta_r_terreau': (0.01, 0.10),   # Can retain more
+    'theta_r_terreau': (0.01, 0.2),   # Can retain more
     'theta_s_terreau': (0.35, 0.55),   # High porosity         
-    'Ks_terreau': (float(np.log10(5e-6)), float(np.log10(5e-3))),
-    #'Ks_terreau': (5e-6, 5e-3),
-
-    # Rain multipliers - based on your system
-    'rain_mult_0': (0.5, 2.0),         # ±100% adjustment
-    'rain_mult_1': (2.0, 10.0),        # GI can have higher mult
+    'Ks_terreau': (float(np.log10(1e-6)), float(np.log10(1e-4))),
+    #'Ks_terreau': (5e-7, 1e-2),
     }
 
     print(f"   ✓ Total parameters to optimize: {len(initial_params)}")
@@ -194,12 +185,13 @@ def main(generic_param):
     print("\n[STEP 4] Running forward simulation with adjoint annotation...")
     print("   (This may take a few minutes...)")
     
+    continue_annotation()
     # Create function space for pressure
     V = FunctionSpace(domain.mesh, "CG", 1, name="pressure")
 
     # CRITICAL: Enable annotation and pass Functions (not dict of floats!)
     probe_manager = your_simulation(param_functions, domain, V)
-    
+
     n_blocks = len(get_working_tape().get_blocks())
     print(f"   ✓ Adjoint tape recorded {n_blocks} operations")
     
@@ -225,8 +217,8 @@ def main(generic_param):
     
     optimized_params = optimizer.optimize(
         method='L-BFGS-B',
-        maxiter=10,     
-        gtol=1e-4,
+        maxiter=20,     
+        gtol=5e-4,
         verbose=True
     )
     
@@ -297,8 +289,8 @@ if __name__ == "__main__":
     # Simulation period
     generic_param = {
         'start_datetime': datetime(2024, 4, 15),
-        'end_datetime': datetime(2024, 5, 30),
-        'timestep_hours': 6,
+        'end_datetime': datetime(2024, 5, 15),
+        'timestep_hours': 12,
     }
     
     # Run optimization
