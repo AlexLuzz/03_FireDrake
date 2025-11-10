@@ -3,6 +3,7 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
+    - [ ] Check for several meteostat source, go back to log10 for Ks
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
     - [ ] adaptative timestep
 

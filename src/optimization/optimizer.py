@@ -119,6 +119,52 @@ class AdjointOptimizer:
         print(f"  Total observations: {n_obs}")
         return loss
     
+    def compute_loss_multiobjective(probe_manager, observations, rain_data):
+        """
+        Comprehensive loss for realistic dynamics
+        """
+        times = probe_manager.data['water_table']['times']
+        sim = probe_manager.data['water_table']['values']
+        obs = observations
+        
+        # 1. MSE on values
+        loss_mse = sum((sim[i] - obs[i])**2 for i in range(len(times)))
+        
+        # 2. Gradient matching
+        loss_grad = 0.0
+        for i in range(len(times)-1):
+            dt = times[i+1] - times[i]
+            grad_sim = (sim[i+1] - sim[i]) / dt
+            grad_obs = (obs[i+1] - obs[i]) / dt
+            loss_grad += (grad_sim - grad_obs)**2
+        
+        # 3. Peak response matching
+        loss_peaks = 0.0
+        for i in range(len(times)):
+            if rain_data.get_at_time(times[i]) > 1e-8:  # Rain event
+                # Weight this point more
+                loss_peaks += 5.0 * (sim[i] - obs[i])**2
+        
+        # 4. Recession rate matching (exponential decay)
+        loss_recession = 0.0
+        for i in range(1, len(times)):
+            if rain_data.get_at_time(times[i]) < 1e-9:  # No rain
+                # Check if it's draining
+                if sim[i] < sim[i-1] and obs[i] < obs[i-1]:
+                    decay_sim = (sim[i-1] - sim[i]) / sim[i-1]
+                    decay_obs = (obs[i-1] - obs[i]) / obs[i-1]
+                    loss_recession += (decay_sim - decay_obs)**2
+        
+        # Weighted combination
+        total_loss = (
+            1.0 * loss_mse +           # Base matching
+            0.5 * loss_grad +           # Rate matching
+            2.0 * loss_peaks +          # Peak emphasis
+            0.3 * loss_recession        # Drainage behavior
+        )
+        
+        return total_loss / len(times)
+
     def optimize(
         self,
         method: str = 'L-BFGS-B',
