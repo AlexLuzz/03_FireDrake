@@ -22,6 +22,7 @@ class SimulationConfig:
     dt: float = 300.0            # Time step (seconds)
     t_end: float = 168 * 3600    # End time (seconds)
     t_end_hours: float = field(init=False)  # End time in hours (computed)
+    dt_hours: float = field(init=False)  # Time step in hours (computed)
 
     # Option 2: Datetime-based (optional, overrides seconds if provided)
     start_datetime: Optional[datetime] = None  # Simulation start time
@@ -49,10 +50,6 @@ class SimulationConfig:
         if self.start_datetime is not None:
             self.time_converter = TimeConverter(self.start_datetime)
             
-            # Convert dt
-            if self.dt_td is not None:
-                self.dt = self.dt_td.total_seconds()
-            
             # Convert duration/end time
             if self.end_datetime is not None and self.duration_td is not None:
                 raise ValueError("Specify either 'end_datetime' or 'duration_td', not both")
@@ -63,8 +60,12 @@ class SimulationConfig:
                 self.t_end = self.duration_td.total_seconds()
             # else: keep the default t_end in seconds
         
+        if self.dt_td is not None:
+            self.dt = self.dt_td.total_seconds()
+
         # Always calculate t_end_hours (regardless of datetime or seconds-based config)
         self.t_end_hours = self.t_end / 3600.0
+        self.dt_hours = self.dt / 3600.0
         
         # Calculate number of steps
         self.num_steps = int(self.t_end / self.dt)

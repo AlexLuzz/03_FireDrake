@@ -3,13 +3,16 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
-    - [ ] Check for several meteostat source, go back to log10 for Ks
+    - [ ] Setup logging
+    - [ ] Mesh size study, try irregular mesh (refined around GI, coarse under water table)
+    - [ ] Redo the whole report printing logic
+    - [ ] Performance optimization
+    - [ ] go back to log10 for Ks
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
     - [ ] adaptative timestep
 
     ## Medium Priority ⚡
     - [ ] Implement test script with ANALYTICAL solution for validation
-    - [ ] Hybrid display on results, plot water table / rain mm / salt flux
     - [ ] Test SUPG and/or crank nicholson for transport ? 
 
     ## Side-side project that will never see the light
@@ -22,6 +25,7 @@
     - [ ] Import curves from txt/csv
 
 ## ✅ Completed
+- [x] Check for several meteostat source - Done, results on drive, stay with YUL (useless)
 - [x] Check ponding problem - no problem, it's a matter of mesh size, timestep
 - [x] implement paths.py logic 
 - [x] implement simple use_UFL param to use symbolic mode if needed
@@ -50,8 +54,3 @@
 - [x] Build a functioning generic source_term instead of former rain_scenario
 - [x] Initial setup
 - [x] Basic structure
-
-
-## 🚀 Future Ideas
-- [ ] Add advanced features
-- [ ] Performance optimization

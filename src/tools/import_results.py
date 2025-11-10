@@ -11,10 +11,11 @@ from typing import Dict, Optional, Union
 from datetime import datetime
 from .csv_loader import CSVLoader
 from .time_converter import TimeConverter
-
+from ..setup.paths import ProjectPaths
+    
 # Default data file paths (edit these as needed)
-DEFAULT_COMSOL_FILE = Path("./data_input/RAF_COMSOL_PZ_CG.csv")
-DEFAULT_MEASURED_FILE = Path("./data_input/MEASURED_PZ_CG.csv")
+DEFAULT_COMSOL_FILE = ProjectPaths().RAF_COMSOL_PZ_CG
+DEFAULT_MEASURED_FILE = ProjectPaths().MEASURED_PZ_CG
 DEFAULT_COMSOL_REF_DATE = datetime(2024, 2, 22)  # COMSOL t=0 reference date
 
 DEFAULT_MEASURED_OFFSETS = {

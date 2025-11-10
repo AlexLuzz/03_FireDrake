@@ -13,10 +13,10 @@ def main():
     # ==========================================
     config = SimulationConfig(
         project_name="Test",
-        user="alexi",
+        user="AQ96560", # alexi or AQ96560
         start_datetime=datetime(2024, 4, 15),
-        end_datetime=datetime(2024, 5, 30),
-        dt_td=timedelta(hours=3)
+        end_datetime=datetime(2024, 4, 30),
+        dt_td=timedelta(hours=12)
     )
     
     # ==========================================
@@ -27,15 +27,15 @@ def main():
         {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': 6.0},
     ]
     
-    rain_source = rainfall_scenario(
+    rain_scenario = rainfall_scenario(
         from_date=config.start_datetime,
         to_date=config.end_datetime,
         # From CSV file (need to specify path and rain unit)
-        csv_path=config.data_input_dir / "BB_METEO.csv",
-        rain_unit="mm/day",
+        #csv_path=config.paths.RAF_METEO,
+        #rain_unit="mm/day",
         # From Meteostat (uncomment to use)
-        #meteostat_station='SOK6B',
-        #meteostat_agg_hours=6,
+        meteostat_station='SOK6B',
+        meteostat_agg_hours=int(config.dt_hours),
         zones=rain_zones
     )
 
@@ -90,7 +90,7 @@ def main():
     solver = RichardsSolver(
         V=V,
         field_map=field_map,
-        source_scenario=rain_source,
+        source_scenario=rain_scenario,
         bc_manager=bc_manager,
         config=config
     )
@@ -107,11 +107,11 @@ def main():
     
     plotter = ResultsPlotter(
         config,
-        probe_manager=probe_manager, 
-        rain_scenario=rain_source, 
-        mesh=domain.mesh,
-        snapshot_manager=snapshot_manager,
-        bc_manager=bc_manager
+        probe_manager, 
+        rain_scenario, 
+        domain,
+        snapshot_manager,
+        bc_manager
     )
     
     # Configure what to plot
@@ -130,11 +130,14 @@ def main():
     #     'measured_data_file': 'path/to/other/measured.csv', 
     #     'measured_offsets': {"LTC 101": 0.5, "LTC 102": 0.6, "LTC 103": 0.4},
     # })
-    
+    """
     plotter.plot_complete_results(
         filename=config.output_dir / f'rain_simulation_{now}.png',
         plotting_config=plotting_config
     )
-    
+    """
+    config.get_sim_duration()
+    report = RichardsReport(plotter).print()
+
 if __name__ == "__main__":
     main()

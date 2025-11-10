@@ -11,12 +11,13 @@ from .plot_configs import DEFAULT_FIELDS, DEFAULT_STYLES, FieldConfig, TimeSerie
 class ResultsPlotter(BasicPlotting):
     
     def __init__(self, config=None, probe_manager=None, rain_scenario=None,
-                 mesh=None, snapshot_manager=None, bc_manager=None,
+                 domain=None, snapshot_manager=None, bc_manager=None,
                  field_configs: Dict[str, FieldConfig] = None,
                  timeseries_styles: Dict[str, TimeSeriesStyle] = None):
         
         self.config = config
-        self.mesh = mesh
+        self.domain = domain
+        self.mesh = domain.mesh
         self.coords = self.mesh.coordinates.dat.data_ro
         self.probe_manager = probe_manager
         self.snapshot_manager = snapshot_manager

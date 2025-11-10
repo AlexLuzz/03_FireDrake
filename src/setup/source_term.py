@@ -220,7 +220,7 @@ class SourceScenario:
         return flux
 
 
-def rainfall_scenario(domain_length: float = None, events: list = None, time_unit: str = "days",
+def rainfall_scenario(events: list = None, time_unit: str = "days",
                      csv_path: str = None, time_col: str = "Date", rain_col: str = "Pluie tot. (mm)",
                      from_date: datetime = None, to_date: datetime = None, 
                      rain_unit: str = "mm/day", zones: list = None,
@@ -229,7 +229,6 @@ def rainfall_scenario(domain_length: float = None, events: list = None, time_uni
     Create rainfall scenario from events, CSV, or Meteostat.
     
     Args:
-        domain_length: Domain length (m), creates single zone [0, domain_length]
         events: List of event dicts with 'start', 'end', 'rate' keys
         csv_path: Path to CSV file with rainfall data
         time_col: Column name for time data
@@ -245,7 +244,6 @@ def rainfall_scenario(domain_length: float = None, events: list = None, time_uni
     Examples:
         # From Meteostat (datetime, auto-computed)
         scenario = rainfall_scenario(
-            domain_length=100,
             meteostat_station='SOK6B',
             from_date=datetime(2024, 5, 1),
             to_date=datetime(2024, 5, 15),
@@ -254,7 +252,6 @@ def rainfall_scenario(domain_length: float = None, events: list = None, time_uni
         
         # From CSV with datetime (accumulated mm → auto-computed to mm/hr)
         scenario = rainfall_scenario(
-            domain_length=100,
             csv_path="rain.csv",
             time_col='Date',
             rain_col='Precipitation (mm)'  # Accumulated over time step
@@ -262,7 +259,6 @@ def rainfall_scenario(domain_length: float = None, events: list = None, time_uni
         
         # From CSV with numeric time (must specify rain_unit)
         scenario = rainfall_scenario(
-            domain_length=100,
             csv_path="rain_numeric.csv",
             time_col='time_hours',
             rain_col='intensity',
@@ -278,12 +274,6 @@ def rainfall_scenario(domain_length: float = None, events: list = None, time_uni
             scenario.add_zone(z['name'], z['x_min'], z['x_max'], 
                             y_min=z.get('y_min'), y_max=z.get('y_max'),
                             multiplier=z.get('multiplier', 1.0))
-    elif domain_length:
-        scenario.add_zone("domain", 0, domain_length)
-    else:
-        # If no zones specified and using CSV, we need domain_length
-        if csv_path or meteostat_station:
-            raise ValueError("Must specify either 'zones' or 'domain_length'")
     
     # Fetch from Meteostat if requested
     if meteostat_station:

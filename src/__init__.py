@@ -73,7 +73,7 @@ from .tools import (
 from .visualization import (
     ResultsPlotter,
     BasicPlotting,
-    SimulationReport
+    RichardsReport
 )
 
 # World
@@ -136,7 +136,7 @@ __all__ = [
     # Visualization
     'ResultsPlotter',
     'BasicPlotting',
-    'SimulationReport',
+    'RichardsReport',
 
     # World
     'Domain',

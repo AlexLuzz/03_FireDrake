@@ -110,8 +110,15 @@ class BasicPlotting:
         return cf
     
     @staticmethod
-    def add_rain_bars(ax, rain_events: List, use_datetime: bool = False):
-        ax_rain = ax.twinx()
+    def add_rain_bars(ax, rain_events: List, use_datetime: bool = False, 
+                      color: str = 'steelblue', color_fill: str = 'skyblue',
+                      label: str = 'Rain Intensity',
+                      twinx=True) -> plt.Axes:
+        # if ax already has data, create twin axis
+        if twinx and ax.has_data():
+            ax_rain = ax.twinx()
+        else:
+            ax_rain = ax
         
         times, intensities = [], []
         sorted_events = sorted(rain_events, key=lambda e: e.start)
@@ -134,12 +141,12 @@ class BasicPlotting:
             intensities.append(0)
             
             ax_rain.fill_between(times, 0, intensities, step='post', alpha=0.3,
-                                color='skyblue', label='Rain Intensity')
+                                color=color_fill)
             ax_rain.plot(times, intensities, drawstyle='steps-post',
-                        color='steelblue', linewidth=2, alpha=0.7)
+                        color=color, linewidth=2, alpha=0.7, label=label)
             
-            ax_rain.set_ylabel('Rain (mm/hr)', fontsize=11, fontweight='bold', color='steelblue')
-            ax_rain.tick_params(axis='y', labelcolor='steelblue')
+            ax_rain.set_ylabel('Rain (mm/hr)', fontsize=11, fontweight='bold', color=color)
+            ax_rain.tick_params(axis='y', labelcolor=color)
             ax_rain.set_ylim(bottom=0)
             
             lines1, labels1 = ax.get_legend_handles_labels()
@@ -246,8 +253,9 @@ class BasicPlotting:
             pass
     
     @staticmethod
-    def plot_material_curves(materials_dict: Dict, figsize=(20, 4)):
-        fig, axes = plt.subplots(1, 4, figsize=figsize)
+    def plot_material_curves(materials_dict: Dict, axes:Optional[plt.Axes]=None):
+        if axes is None:
+            _, axes = plt.subplots(1, 4, figsize=(20, 4))
         
         hp_range = np.linspace(-10, 0, 1000)
         param_text = "SOIL PARAMETERS\n\n"
@@ -335,11 +343,12 @@ class BasicPlotting:
         axes[3].set_title('Material Parameters', fontsize=12, fontweight='bold')
         
         plt.tight_layout()
-        return fig
+        return axes
     
     @staticmethod
-    def plot_domain_geometry(Lx: float, Ly: float, regions: Dict, figsize=(14, 5)):
-        fig, ax = plt.subplots(figsize=figsize)
+    def plot_domain_geometry(Lx: float, Ly: float, regions: Dict, ax:Optional[plt.Axes]=None):
+        if ax is None:
+            _, ax = plt.subplots(figsize=(14, 5))
         
         material_colors = {
             'base': '#8B4513',
@@ -393,4 +402,4 @@ class BasicPlotting:
             ax.legend(loc='upper right', fontsize=11, framealpha=0.9)
         
         plt.tight_layout()
-        return fig, ax
+        return ax
