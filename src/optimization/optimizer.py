@@ -111,7 +111,8 @@ class AdjointOptimizer:
             diff = field_at_probes - obs_func
             weighted_diff = weight_func * diff
             
-            total_loss += weighted_diff * weighted_diff * dx            
+            # L1 norm
+            total_loss += abs(weighted_diff) * dx            
             n_obs += len(probe_manager.probe_positions)
 
         loss = assemble(Constant(1.0 / float(n_obs)) * total_loss)

@@ -17,6 +17,7 @@ class MaterialField:
         print(domain)
 
         self.V = function_space
+        self.use_UFL = self.domain.use_UFL
 
         self.domain.prepare_for_symbolic_mode(function_space)
         
@@ -36,20 +37,8 @@ class MaterialField:
         else:
             state_list = [state_functions]
         
-        # Check if we need symbolic mode
-        # Condition 1: State variables are UFL expressions
-        states_are_symbolic = any(hasattr(sf, "ufl_element") for sf in state_list)
         
-        # Condition 2: Property values are UFL (test with first material)
-        test_material = list(self.domain.materials.values())[0]
-        test_val = (property_func(test_material, *state_list) if state_list 
-                   else property_func(test_material))
-        property_is_symbolic = (hasattr(test_val, "ufl_element") or 
-                               isinstance(test_val, Constant))
-        
-        symbolic_mode = states_are_symbolic or property_is_symbolic
-        
-        if symbolic_mode:
+        if self.use_UFL:
             # ========================================
             # SYMBOLIC PATH: Preserve UFL structure
             # ========================================

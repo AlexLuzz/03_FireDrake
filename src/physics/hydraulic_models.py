@@ -113,7 +113,8 @@ class VanGenuchtenModel(HydraulicModel):
                  params: VanGenuchtenParams, 
                  epsilon: float = 0.051,
                  kr_min: float = 1e-8,
-                 Ss: float = 1e-4):
+                 Ss: float = 1e-4,
+                 use_UFL: bool = False):
         """
         Parameters:
         -----------
@@ -131,7 +132,8 @@ class VanGenuchtenModel(HydraulicModel):
         self.epsilon = epsilon
         self.kr_min = kr_min
         self.Ss = Ss
-
+        self.use_UFL = use_UFL
+    
     @property
     def theta_r(self) -> float:
         return self.params.theta_r
@@ -139,92 +141,6 @@ class VanGenuchtenModel(HydraulicModel):
     @property
     def theta_s(self) -> float:
         return self.params.theta_s
-    
-    def _Se_old(self, pressure: float) -> float:
-        """
-        S_e(p): Effective saturation [-]
-        S_e = 1 / [1 + (α|p|)^n]^m
-        """
-        eps = self.epsilon
-        alpha = self.params.alpha
-        n = self.params.n
-        m = self.params.m
-
-        if pressure >= eps:
-            return 1.0
-        elif pressure <= -eps:
-            Se = 1.0 / (1.0 + (alpha * abs(pressure))**n)**m
-            #return max_value(0.0, min_value(1.0, Se))  # clamp between 0 and 1
-            return max(0.0, min(1.0, Se))  # clamp between 0 and 1
-        else:
-            Se_unsat = 1.0 / (1.0 + (alpha * eps)**n)**m # lower end (unsaturated)
-            # Linear interpolation between unsaturated and saturated ends
-            weight = (pressure + eps) / (2.0 * eps)
-            Se = Se_unsat + (1.0 - Se_unsat) * weight
-            return max(0.0, min(1.0, Se))
-
-    
-    def _kr_old(self, pressure) -> float:
-        """
-        Kr(p): Relative permeability [-] via Mualem model
-        Kr(p) = S_e(p)^l * [1 - (1 - S_e(p)^(1/m))^m]^2
-        """
-        eps = self.epsilon
-        l = self.params.l_param
-        m = self.params.m
-        if pressure >= eps:
-            return 1.0
-        elif pressure <= -eps:
-            Se = self._Se(pressure)
-            term = max(0.0, 1.0 - Se**(1.0/m))  # avoid tiny negatives
-            kr_val = (Se**l) * (1.0 - term**m)**2
-            return max(self.kr_min, min(kr_val, 1.0))
-        else:
-            # Compute unsaturated endpoint value
-            Se_unsat = self._Se(-eps)
-            term = max(0.0, 1.0 - Se_unsat**(1.0/m))
-            kr_unsat = (Se_unsat**l) * (1.0 - term**m)**2
-            kr_unsat = max(self.kr_min, min(kr_unsat, 1.0))
-
-            # Linear interpolation between unsaturated and saturated states
-            weight = (pressure + eps) / (2.0 * eps)
-            kr_val = kr_unsat + (1.0 - kr_unsat) * weight
-            return max(self.kr_min, min(kr_val, 1.0))
-    
-    def _Cm_old(self, pressure) -> float:
-        """
-        Cm(p): Moisture capacity [1/m]
-        Cm(p) = alpha * m / (1 - m) * (θ_s - θ_r) * S_e^(1/m) * (1 - S_e^(1/m))^m
-        """
-        alpha = self.params.alpha
-        m = self.params.m
-        theta_s = self.params.theta_s
-        theta_r = self.params.theta_r
-        eps = self.epsilon
-        if pressure >= eps:
-            return self.Ss
-        elif pressure <= -eps:
-            Se = self._Se(pressure)
-            term = max(0.0, 1.0 - Se**(1.0 / m))
-            Cm_val = ((alpha * m) / (1.0 - m) *
-                    (theta_s - theta_r) *
-                    Se**(1.0 / m) *
-                    term**m)
-            return max(self.Ss, Cm_val)
-        else:
-            # Unsaturated endpoint at -eps
-            Se_unsat = self._Se(-eps)
-            term = max(0.0, 1.0 - Se_unsat**(1.0 / m))
-            Cm_unsat = ((alpha * m) / (1.0 - m) *
-                        (theta_s - theta_r) *
-                        Se_unsat**(1.0 / m) *
-                        term**m)
-            Cm_unsat = max(self.Ss, Cm_unsat)
-
-            # Linear interpolation between unsat and sat
-            weight = (pressure + eps) / (2.0 * eps)
-            Cm_val = Cm_unsat + (self.Ss - Cm_unsat) * weight
-            return max(self.Ss, Cm_val)
         
     def _theta(self, pressure) -> float:
         """
@@ -251,12 +167,13 @@ class VanGenuchtenModel(HydraulicModel):
         S_e(p): Effective saturation [-]
         Fast path for floats, symbolic path for UFL
         """
-        if hasattr(pressure, 'ufl_element'):
+        eps = self.epsilon
+        alpha = self.params.alpha
+        n = self.params.n
+        m = self.params.m
+        
+        if self.use_UFL:
             # Symbolic path for UFL
-            eps = self.epsilon
-            alpha = self.params.alpha
-            n = self.params.n
-            m = self.params.m
             Se = 1.0 / (1.0 + (alpha * abs(pressure))**n)**m
             Se_smooth = conditional(
                 pressure >= eps,
@@ -271,10 +188,6 @@ class VanGenuchtenModel(HydraulicModel):
             )
             return min_value(1.0, max_value(0.0, Se_smooth))
         else:
-            eps = self.epsilon
-            alpha = self.params.alpha
-            n = self.params.n
-            m = self.params.m
             if pressure >= eps:
                 return 1.0
             elif pressure <= -eps:
@@ -291,10 +204,10 @@ class VanGenuchtenModel(HydraulicModel):
         Kr(p): Relative permeability [-] via Mualem model
         Kr(p) = S_e(p)^l * [1 - (1 - S_e(p)^(1/m))^m]^2
         """
-        if hasattr(pressure, 'ufl_element'):
-            eps = self.epsilon
-            l = self.params.l_param
-            m = self.params.m
+        eps = self.epsilon
+        l = self.params.l_param
+        m = self.params.m
+        if self.use_UFL:
             Se = self._Se(pressure)
             term = max_value(0.0, 1.0 - Se**(1.0/m))
             kr_val = (Se**l) * (1.0 - term**m)**2
@@ -310,9 +223,6 @@ class VanGenuchtenModel(HydraulicModel):
             )
             return min_value(1.0, max_value(self.kr_min, kr_smooth))
         else:
-            eps = self.epsilon
-            l = self.params.l_param
-            m = self.params.m
             if pressure >= eps:
                 return 1.0
             elif pressure <= -eps:
@@ -336,12 +246,13 @@ class VanGenuchtenModel(HydraulicModel):
         Cm(p): Moisture capacity [1/m]
         Cm(p) = alpha * m / (1 - m) * (θ_s - θ_r) * S_e^(1/m) * (1 - S_e^(1/m))^m
         """
-        if hasattr(pressure, 'ufl_element'):
-            alpha = self.params.alpha
-            m = self.params.m
-            theta_s = self.params.theta_s
-            theta_r = self.params.theta_r
-            eps = self.epsilon
+        alpha = self.params.alpha
+        m = self.params.m
+        theta_s = self.params.theta_s
+        theta_r = self.params.theta_r
+        eps = self.epsilon
+        Ss = self.Ss
+        if self.use_UFL:
             Se = self._Se(pressure)
             term = max_value(0.0, 1.0 - Se**(1.0 / m))
             Cm_val = ((alpha * m) / (1.0 - m) *
@@ -350,22 +261,16 @@ class VanGenuchtenModel(HydraulicModel):
                     term**m)
             Cm_smooth = conditional(
                 pressure >= eps,
-                self.Ss,
+                Ss,
                 conditional(
                     pressure <= -eps,
                     Cm_val,
                     # Linear interpolation in transition
-                    Cm_val + (self.Ss - Cm_val) * (pressure + eps) / (2.0 * eps)
+                    Cm_val + (Ss - Cm_val) * (pressure + eps) / (2.0 * eps)
                 )
             )
-            return max_value(self.Ss, Cm_smooth)
+            return max_value(Ss, Cm_smooth)
         else:
-            alpha = self.params.alpha
-            m = self.params.m
-            theta_s = self.params.theta_s
-            theta_r = self.params.theta_r
-            eps = self.epsilon
-            Ss = self.Ss
             if pressure >= eps:
                 return Ss
             elif pressure <= -eps:

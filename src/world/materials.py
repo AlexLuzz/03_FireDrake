@@ -10,6 +10,12 @@ class Material:
     soil: SoilParameters
     hydraulic: Union[VanGenuchtenModel, CurveBasedHydraulicModel]
     transport: AnalyticalTransportModel
+
+    def set_UFL_mode(self, use_UFL: bool):
+        """Enable/disable UFL mode for symbolic computation"""
+        self.hydraulic.use_UFL = use_UFL
+        self.transport.use_UFL = use_UFL
+        return self
     
     def __repr__(self):
         return f"Material(soil={self.soil.name})"

@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 from firedrake import FunctionSpace
-from pyadjoint import pause_annotation
 from src import *
+from firedrake import *
+from pyadjoint import pause_annotation
 
 pause_annotation()
 
@@ -11,10 +12,11 @@ def main():
     # 1. CONFIGURATION
     # ==========================================
     config = SimulationConfig(
-        name="Test",
+        project_name="Test",
+        user="alexi",
         start_datetime=datetime(2024, 4, 15),
         end_datetime=datetime(2024, 5, 30),
-        dt_td=timedelta(hours=6)
+        dt_td=timedelta(hours=3)
     )
     
     # ==========================================
@@ -41,7 +43,7 @@ def main():
     # ==========================================
     # 3. GEOMETRY (Domain - pure geometry)
     # ==========================================
-    domain = Domain(nx=60, ny=30, Lx=20.0, Ly=5.0)
+    domain = Domain(nx=80, ny=40, Lx=20.0, Ly=5.0)
     domain.add_rectangle("GI", 9.0, 11.0, 4.0, 5.0)
     
     # ==========================================
@@ -119,7 +121,6 @@ def main():
         'plot_measured_comparison': True,          # Set to True to use default measured file
         'plot_snapshots': True,                     # Snapshot plots if data available
         'snapshot_fields': ['saturation'],         # Fields to show in snapshots
-        'snapshot_overlay': False                   # Single field snapshots
     }
     
     # Optional: Override defaults if needed

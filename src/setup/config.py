@@ -4,17 +4,18 @@ Contains domain geometry, time stepping, and solver parameters
 """
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import  Optional
 from datetime import datetime, timedelta
 from ..tools import *
+from .paths import ProjectPaths
 
 @dataclass
 class SimulationConfig:
     """Global simulation configuration - geometry, time, and numerics"""
     
     # Identification
-    name: str = "Richards_Rain_Event"
-    description: str = "Rain event simulation"
+    project_name: str = None
+    user: str = "alexi"
     
     # Time discretization (can use EITHER seconds OR datetime/timedelta)
     # Option 1: Traditional seconds-based (backward compatible)
@@ -39,26 +40,6 @@ class SimulationConfig:
     data_input_dir: Path = Path("./data_input")
     data_output_dir: Path = Path("./data_output")
     save_frequency: int = 60    # Save every N steps
-    
-    # Solver parameters
-    solver_type: str = 'gmres'
-    preconditioner: str = 'hypre'  # 'ilu' for small, 'hypre' for large
-    preconditioner_type: str = 'boomeramg'
-    rtol: float = 1e-4
-    atol: float = 1e-5
-    max_iter: int = 100
-    
-    @property
-    def solver_parameters(self):
-        """Return solver parameters dict for Firedrake"""
-        return {
-            'ksp_type': self.solver_type,
-            'pc_type': self.preconditioner,
-            'pc_hypre_type': self.preconditioner_type,
-            'ksp_rtol': self.rtol,
-            'ksp_atol': self.atol,
-            'ksp_max_it': self.max_iter
-        }
     
     def __post_init__(self):
         """Initialize computed fields and handle datetime conversion"""
@@ -89,7 +70,10 @@ class SimulationConfig:
         self.num_steps = int(self.t_end / self.dt)
         
         # Create output directory
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.paths = ProjectPaths(user=self.user, 
+                                  project_name=self.project_name 
+                                  )
+        self.output_dir = self.paths.OUTPUT_DIR
         
         # Print configuration summary
         if self.start_datetime is not None:

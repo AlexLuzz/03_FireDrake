@@ -5,7 +5,6 @@
     ## High Priority 🔥
     - [ ] Clarify source_term units ! maybe add an explanation -- it'll be indirectly done through analytical validations
     - [ ] adaptative timestep
-    - [ ] Check ponding problem
 
     ## Medium Priority ⚡
     - [ ] Implement test script with ANALYTICAL solution for validation
@@ -22,6 +21,9 @@
     - [ ] Import curves from txt/csv
 
 ## ✅ Completed
+- [x] Check ponding problem - no problem, it's a matter of mesh size, timestep
+- [x] implement paths.py logic 
+- [x] implement simple use_UFL param to use symbolic mode if needed
 - [x] Use pyadjoint and code a optimization loop to auto-fit parameters ! (probably doable for richard's) 
 - [x-ish] Improve functionSpace and boundary conditions declaration logic - 
           Maybe a manager would clarify and avoid lot of repetitions

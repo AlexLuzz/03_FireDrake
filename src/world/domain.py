@@ -3,11 +3,13 @@ import numpy as np
 from typing import Callable, List, Tuple
 
 class Domain:
-    def __init__(self, nx: int, ny: int, Lx: float, Ly: float):
+    def __init__(self, nx: int, ny: int, Lx: float, Ly: float, use_UFL: bool = False):
         self.nx = nx
         self.ny = ny
         self.Lx = Lx
         self.Ly = Ly
+
+        self.use_UFL = use_UFL
         
         # Create Firedrake mesh directly
         self.mesh = RectangleMesh(nx, ny, Lx, Ly)
@@ -90,6 +92,10 @@ class Domain:
         """Assign material (HydraulicModel, Ks) to region"""
         if region_name not in self.regions:
             raise ValueError(f"Region '{region_name}' not in domain")
+        
+        # Automatically set UFL mode on material to match domain
+        material.set_UFL_mode(self.use_UFL)
+        
         self.materials[region_name] = material
         return self
     

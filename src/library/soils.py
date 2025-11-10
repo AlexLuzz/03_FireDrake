@@ -34,7 +34,7 @@ class SoilParameters:
             name="Till",
             Ks=9e-6,          # Very low permeability
             porosity=0.4,
-            theta_r=0.011,
+            theta_r=0.01,
             bulk_density=2200.0   # Dense material
         )
     
@@ -45,7 +45,7 @@ class SoilParameters:
             name="Terreau",
             Ks=4e-5,          # Medium permeability
             porosity=0.3,
-            theta_r=0.017,
+            theta_r=0.02,
             bulk_density=1200.0   # Light material
         )
     
