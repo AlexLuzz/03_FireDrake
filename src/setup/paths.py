@@ -4,7 +4,7 @@ import os
 class ProjectPaths:
     """Centralized path management for the project"""
     
-    def __init__(self, user='AQ96560', project_name=None, base_dir=None):
+    def __init__(self, user='alexi', project_name=None, base_dir=None):
         """
         Initialize project paths based on the user.
         

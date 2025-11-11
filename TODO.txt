@@ -3,6 +3,7 @@
 ## 🔄 In Progress
 
     ## High Priority 🔥
+    - [ ] Plot param fields on report
     - [ ] Setup logging
     - [ ] Mesh size study, try irregular mesh (refined around GI, coarse under water table)
     - [ ] Redo the whole report printing logic

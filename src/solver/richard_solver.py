@@ -63,7 +63,6 @@ class RichardsSolver:
         Cm = self.field_map.get_Cm_field(self.p_n)
         K = self.field_map.get_K_field(self.p_n)
         
-
         bcs = self.bc_manager.get_dirichlet_bcs(t)
         rain_flux = -self.source_scenario.get_flux_expression(t, self.mesh)
         

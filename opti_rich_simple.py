@@ -55,7 +55,7 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
         theta_s=param_constants['theta_s_till'],
         alpha=np.e**param_constants['alpha_till'],
         n=param_constants['n_till'],
-        Ks=np.e**param_constants['Ks_till'],
+        Ks=10**param_constants['Ks_till'],
     ))
 
     domain.assign("GI", Material.terreau(
@@ -63,7 +63,7 @@ def your_simulation(param_constants: Dict[str, Function], domain, V) -> ProbeMan
         theta_s=param_constants['theta_s_terreau'],
         alpha=np.e**param_constants['alpha_terreau'],
         n=param_constants['n_terreau'],
-        Ks=np.e**param_constants['Ks_terreau'],
+        Ks=10**param_constants['Ks_terreau'],
     ))
 
     field_map = MaterialField(domain, V)
@@ -135,14 +135,14 @@ def main(generic_param):
         'theta_s_till': 0.14,
         'alpha_till': float(np.log(0.9399)),
         'n_till': 2.3579,
-        'Ks_till': float(np.log(9e-6)),
+        'Ks_till': float(np.log10(9e-6)),
         
         # Terreau soil parameters (5)
         'theta_r_terreau': 0.02,
         'theta_s_terreau': 0.43,
         'alpha_terreau': float(np.log(1.1670)),
         'n_terreau': 2.1052,
-        'Ks_terreau': float(np.log(4e-5)),
+        'Ks_terreau': float(np.log10(4e-5)),
 
         # Rain multipliers (2)
         'rain_mult_0': 1.0,
@@ -155,18 +155,18 @@ def main(generic_param):
     
     realistic_bounds = {
     # Till (clayey soil) - tight bounds based on literature
-    'theta_r_till': (0.01, 0.10),      # Residual moisture
-    'theta_s_till': (0.12, 0.22),      # Saturated (clay is 0.1-0.2)
+    'theta_r_till': (0.01, 0.08),      # Residual moisture
+    'theta_s_till': (0.13, 0.22),      # Saturated (clay is 0.1-0.2)
     'alpha_till': (float(np.log(0.8)), float(np.log(1.2))),
     'n_till': (1.5, 3.5),
-    'Ks_till':  (float(np.log(1e-7)), float(np.log(1e-4))),
+    'Ks_till':  (float(np.log10(1e-7)), float(np.log10(1e-4))),
 
     # Terreau (organic soil) - wider bounds
     'theta_r_terreau': (0.01, 0.2),   # Can retain more
     'theta_s_terreau': (0.35, 0.55),   # High porosity    
     'alpha_terreau': (float(np.log(0.8)), float(np.log(1.5))), 
     'n_terreau': (1.5, 3.5),
-    'Ks_terreau': (float(np.log(1e-6)), float(np.log(1e-4))),
+    'Ks_terreau': (float(np.log10(1e-6)), float(np.log10(1e-4))),
     }
 
     print(f"   ✓ Total parameters to optimize: {len(initial_params)}")
@@ -288,8 +288,8 @@ def main(generic_param):
 if __name__ == "__main__":
     # Simulation period
     generic_param = {
-        'start_datetime': datetime(2024, 4, 15),
-        'end_datetime': datetime(2024, 6, 30),
+        'start_datetime': datetime(2024, 6, 1),
+        'end_datetime': datetime(2024, 7, 30),
         'timestep_hours': 6,
     }
     

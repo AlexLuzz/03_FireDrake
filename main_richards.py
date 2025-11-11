@@ -13,10 +13,10 @@ def main():
     # ==========================================
     config = SimulationConfig(
         project_name="Test",
-        user="AQ96560", # alexi or AQ96560
+        user="alexi", # alexi or AQ96560
         start_datetime=datetime(2024, 4, 15),
-        end_datetime=datetime(2024, 4, 30),
-        dt_td=timedelta(hours=12)
+        end_datetime=datetime(2024, 6, 30),
+        dt_td=timedelta(hours=3)
     )
     
     # ==========================================
@@ -31,11 +31,11 @@ def main():
         from_date=config.start_datetime,
         to_date=config.end_datetime,
         # From CSV file (need to specify path and rain unit)
-        #csv_path=config.paths.RAF_METEO,
-        #rain_unit="mm/day",
+        csv_path=config.paths.RAF_METEO,
+        rain_unit="mm/day",
         # From Meteostat (uncomment to use)
-        meteostat_station='SOK6B',
-        meteostat_agg_hours=int(config.dt_hours),
+        #meteostat_station='SOK6B',
+        #meteostat_agg_hours=int(config.dt_hours),
         zones=rain_zones
     )
 

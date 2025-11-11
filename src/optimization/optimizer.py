@@ -5,7 +5,7 @@ Adjoint-Based Parameter Optimization for Firedrake
 import numpy as np
 from typing import Dict, Tuple, List, Optional
 from dataclasses import dataclass
-from firedrake import Function, assemble, Constant, FunctionSpace, dx
+from firedrake import Function, assemble, Constant, FunctionSpace, dx, sqrt
 from firedrake.adjoint import Control, ReducedFunctional, minimize
 from pyadjoint.reduced_functional_numpy import ReducedFunctionalNumPy
 
@@ -97,7 +97,7 @@ class AdjointOptimizer:
         n_obs = 0
         
         print(f"  Using timesteps {cutoff} to {n_times-1}")
-
+        
         for i, (t, field_name, field_at_probes) in enumerate(recorded_functions):
             if i < cutoff:
                 continue
@@ -105,19 +105,20 @@ class AdjointOptimizer:
             obs_func = Function(P0)
             obs_func.dat.data[:] = self.observations.values[i, :]
             
-            weight_func = Function(P0)
-            weight_func.dat.data[:] = self.observations.weights[i, :]
-            
             diff = field_at_probes - obs_func
-            weighted_diff = weight_func * diff
             
-            # L1 norm
-            total_loss += abs(weighted_diff) * dx            
+            # Append each squared error term
+            total_loss += diff * diff * dx
             n_obs += len(probe_manager.probe_positions)
-
-        loss = assemble(Constant(1.0 / float(n_obs)) * total_loss)
+        
+        mse = assemble(Constant(1.0 / float(n_obs)) * total_loss)
+        rmse_value = np.sqrt(float(mse))
+        
         print(f"  Total observations: {n_obs}")
-        return loss
+        print(f"  MSE: {float(mse):.6e}, RMSE: {rmse_value:.6e}")
+        
+        # Return the UFL Form (not assembled!), so ReducedFunctional can use it
+        return mse
     
     def compute_loss_multiobjective(probe_manager, observations, rain_data):
         """
