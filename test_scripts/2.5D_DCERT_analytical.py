@@ -1,125 +1,124 @@
+#!/usr/bin/env python
+"""
+2.5D Geoelectrical modeling: div(sigma*grad(u)) - sigma*k^2*u = -I*delta(r-r_s)
+Following Dey & Morrison (1979) for mixed boundary conditions
+"""
 import numpy as np
 import matplotlib.pyplot as plt
-from firedrake import *
-from scipy.special import k0
-from firedrake.pyplot import tricontourf, tripcolor
 import matplotlib.ticker as ticker
+from firedrake import *
+from firedrake.pyplot import tricontourf, triplot
+from scipy.special import k0
 
-# 1. Configuration
-source_A = (-5.25, -3.75)
-source_B = (5.25, -3.75)
-k_val = 1e-2
-sigma_val = 1.0
+# Parameters
+source_A, source_B = (-5.25, -3.75), (5.25, -3.75)
+k_val, sigma_val = 1e-2, 1.0
 
+# Create and translate mesh to [-10,10] x [-15,0]
 mesh = RectangleMesh(100, 75, 20.0, 15.0)
-mesh.coordinates.dat.data[:, 0] -= 10.0
-mesh.coordinates.dat.data[:, 1] -= 15.0
+X = mesh.coordinates
+with X.dat.vec as v:
+    arr = v.array.reshape((-1, 2))
+    arr[:, 0] -= 10.0
+    arr[:, 1] -= 15.0
 
-# 2. Raffinement par déformation (Warping)
-# On accède directement aux coordonnées pour les manipuler avec NumPy
-import numpy as np
-coords = mesh.coordinates.dat.data
-x_old = coords[:, 0].copy()
-y_old = coords[:, 1].copy()
+# Adaptive mesh refinement near sources
+# Why: Point sources create sharp singularities requiring fine resolution
+# How: Apply radial displacement inversely proportional to distance
+coords = mesh.coordinates.dat.data_ro
+x_old, y_old = coords[:, 0].copy(), coords[:, 1].copy()
+disp_x, disp_y = np.zeros_like(x_old), np.zeros_like(y_old)
 
-# --- Raffinement vertical (vers la surface y=0) ---
-# On utilise une fonction de puissance : plus l'exposant est élevé, 
-# plus les mailles sont écrasées vers le haut.
-depth_norm = np.abs(y_old) / 15.0  # de 1 (fond) à 0 (surface)
-coords[:, 1] = -15.0 * (depth_norm**2.0)  # L'exposant 2.0 densifie vers 0
+for sx, sy in [source_A, source_B]:
+    rx, ry = x_old - sx, y_old - sy
+    r = np.sqrt(rx**2 + ry**2) + 1e-8
+    w = 1.0 / (1.0 + (r / 1.0)**3)  # Weight: strong near source, weak far away
+    disp_x -= 0.8 * w * rx  # Pull nodes toward source
+    disp_y -= 0.8 * w * ry
 
-# --- Raffinement horizontal (vers le centre x=0) ---
-# On densifie vers le centre pour mieux capturer les deux électrodes
-x_norm = x_old / 10.0  # de -1 à 1
-coords[:, 0] = 10.0 * np.sign(x_norm) * (np.abs(x_norm)**1.5)
+X = mesh.coordinates
+with X.dat.vec as v:
+    arr = v.array.reshape((-1, 2))
+    arr[:, 0], arr[:, 1] = x_old + disp_x, y_old + disp_y
 
+# Function space (P2 = quadratic elements for better accuracy)
 V = FunctionSpace(mesh, "CG", 2)
 
-# 2. Solution Analytique (pour les BC et la comparaison)
-def get_analytical_solution(V, src_A, src_B, k, sigma):
-    u_ana = Function(V)
-    # Récupération des coordonnées des DOFs (nœuds de calcul)
+# Analytical solution following Dey & Morrison (1979)
+# Uses Bessel K0 function with mirror source at surface (y=0)
+def analytical_solution(V, src_A, src_B, k, sigma):
     v_coords = Function(VectorFunctionSpace(mesh, "CG", V.ufl_element().degree()))
     v_coords.interpolate(SpatialCoordinate(mesh))
     coords = v_coords.dat.data
     
-    def potential(src, coords):
-        r1 = np.sqrt((coords[:, 0] - src[0])**2 + (coords[:, 1] - src[1])**2)
-        r2 = np.sqrt((coords[:, 0] - src[0])**2 + (coords[:, 1] + src[1])**2) # Miroir
-        r1 = np.maximum(r1, 1e-10)
-        r2 = np.maximum(r2, 1e-10)
-        return (1.0 / (2.0 * np.pi * sigma)) * (k0(r1 * k) + k0(r2 * k))
-
-    u_ana.dat.data[:] = potential(src_A, coords) - potential(src_B, coords)
+    def potential(src):
+        # r_pos: distance to actual source
+        r_pos = np.maximum(np.sqrt((coords[:, 0] - src[0])**2 + (coords[:, 1] - src[1])**2), 1e-12)
+        # r_neg: distance to mirror source (reflected across y=0)
+        r_neg = np.maximum(np.sqrt((coords[:, 0] - src[0])**2 + (coords[:, 1] + src[1])**2), 1e-12)
+        # Potential: u = 1/(2π·σ) · [K₀(r_pos·k) + K₀(r_neg·k)]
+        return (1.0 / (2.0 * np.pi * sigma)) * (k0(r_pos * k) + k0(r_neg * k))
+    
+    u_ana = Function(V)
+    u_ana.dat.data[:] = potential(src_A) - potential(src_B)
     return u_ana
 
-u_exact = get_analytical_solution(V, source_A, source_B, k_val, sigma_val)
+u_exact = analytical_solution(V, source_A, source_B, k_val, sigma_val)
 
-# 3. Résolution Numérique "Manuelle"
-u = TrialFunction(V)
-v = TestFunction(V)
+# Numerical solution setup
+u, v = TrialFunction(V), TestFunction(V)
+
+# Weak form: ∫ σ∇u·∇v dx + ∫ σk²uv dx = ∫ I·δ(r-r_s)·v dx
+# Left side becomes matrix A, right side becomes vector b
 a = sigma_val * inner(grad(u), grad(v)) * dx + sigma_val * k_val**2 * u * v * dx
-L = Constant(0) * v * dx
+L = Constant(0) * v * dx  # Will add point sources manually
 
-# Condition de Dirichlet sur les bords (Indispensable pour comparer à l'analytique)
+# Dirichlet BC on boundaries (using analytical solution)
 bc = DirichletBC(V, u_exact, "on_boundary")
+A, b = assemble(a, bcs=bc), assemble(L)
 
-# Assemblage du système
-A = assemble(a, bcs=bc)
-b = assemble(L)
-
-# INJECTION MANUELLE : On trouve les indices des nœuds les plus proches
+# Point source injection: find DOFs (degrees of freedom) nearest to sources
+# DOFs are the mesh nodes where the solution is computed
+# For P2 elements: vertices + edge midpoints
 v_coords = Function(VectorFunctionSpace(mesh, "CG", V.ufl_element().degree()))
 v_coords.interpolate(SpatialCoordinate(mesh))
 coords = v_coords.dat.data
 
-def find_nearest_dof(target_coord, all_coords):
-    dists = np.sum((all_coords - target_coord)**2, axis=1)
-    return np.argmin(dists)
+def find_nearest_dof(target, all_coords):
+    return np.argmin(np.sum((all_coords - target)**2, axis=1))
 
-idx_A = find_nearest_dof(source_A, coords)
-idx_B = find_nearest_dof(source_B, coords)
+idx_A, idx_B = find_nearest_dof(source_A, coords), find_nearest_dof(source_B, coords)
 
-# On modifie le vecteur b directement (I=1A en A, I=-1A en B)
+# Inject current: +1A at source A, -1A at source B (dipole configuration)
 with b.dat.vec as b_vec:
     b_vec.setValue(idx_A, 1.0, addv=True)
     b_vec.setValue(idx_B, -1.0, addv=True)
 
+# Solve linear system A·u = b using direct LU factorization
 u_num = Function(V)
 solve(A, u_num, b, solver_parameters={'ksp_type': 'preonly', 'pc_type': 'lu'})
 
-# 4. Affichage
+# Plotting
 fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
-# 1. Plot du Potentiel (Linéaire)
+# Potential field
 cnt0 = tricontourf(u_num, axes=axes[0], levels=20, cmap='RdBu_r')
-axes[0].set_title("Potentiel Numérique $u$ [V]")
-plt.colorbar(cnt0, ax=axes[0], label='Potentiel [V]')
+axes[0].set_title("Potential $u$ [V]")
+plt.colorbar(cnt0, ax=axes[0], label='Potential [V]')
 
-# 2. Plot de l'Erreur (LogNorm en Volts)
-error_field = Function(V).interpolate(abs(u_num - u_exact))
-# On récupère les données et on applique un "clip"
-err_data = np.clip(error_field.dat.data, 1e-10, None)
-# On crée un champ avec le log10 des valeurs
+# Error field (log scale)
+error = Function(V).interpolate(abs(u_num - u_exact))
 error_log = Function(V)
-error_log.dat.data[:] = np.log10(err_data)
+error_log.dat.data[:] = np.log10(np.clip(error.dat.data, 1e-12, None))
 
-# 2. Définition des niveaux log (ex: de -7 à -1)
-levels_log = np.arange(-7, 0, 1) # Paliers : -7, -6, -5, -4, -3, -2, -1
+levels_log = np.arange(-7, 0, 1)
+cnt1 = tricontourf(error_log, levels=levels_log, extend='both', cmap='Reds', axes=axes[1])
+triplot(mesh, axes=axes[1], interior_kw={'edgecolor': 'black', 'linewidth': 0.3, 'alpha': 0.3})
+axes[1].set_title("Error $|u_{exact} - u_{num}|$ [V]")
 
-# 3. On plot le champ LOG avec des niveaux LINÉAIRES
-cnt1 = tricontourf(error_log, 
-                  levels=levels_log, 
-                  extend='both', 
-                  cmap='Reds', 
-                  axes=axes[1])
-
-axes[1].set_title("Erreur $|u_{exact} - u_{num}|$ [V]")
 cbar = plt.colorbar(cnt1, ax=axes[1], ticks=levels_log)
-def log_formatter(x, pos):
-    return f"$10^{{{int(x)}}}$"
-cbar.ax.yaxis.set_major_formatter(ticker.FuncFormatter(log_formatter))
-cbar.set_label('Erreur $|u_{exact} - u_{num}|$ [V]')
+cbar.ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"$10^{{{int(x)}}}$"))
+cbar.set_label('Error [V]')
 
 for ax in axes:
     ax.set_aspect('equal')
@@ -129,4 +128,10 @@ for ax in axes:
     ax.set_ylabel("y [m]")
 
 plt.tight_layout()
-plt.savefig('firedrake_geoelectricV2.png', dpi=150, bbox_inches='tight')
+plt.savefig('firedrake_geoelectric.png', dpi=150, bbox_inches='tight')
+
+# Error norms
+L2_error = sqrt(assemble(inner(u_num - u_exact, u_num - u_exact) * dx))
+H1_error = sqrt(assemble(inner(grad(u_num - u_exact), grad(u_num - u_exact)) * dx))
+print(f"L2 error: {L2_error:.6e}")
+print(f"H1 error: {H1_error:.6e}")
