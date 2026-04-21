@@ -1,6 +1,6 @@
 from firedrake import RectangleMesh
 import numpy as np
-from typing import Callable, List, Tuple
+from typing import Callable, List, Tuple, Dict
 
 class Domain:
     def __init__(self, nx: int, ny: int, Lx: float, Ly: float, use_UFL: bool = False):
@@ -17,7 +17,8 @@ class Domain:
         # Get coordinates for region definitions
         self.coords = self.mesh.coordinates.dat.data_ro
         
-        self.regions = {}
+        self.regions = {}          # Stores the boolean masks for Firedrake
+        self.region_metadata = {}  # Stores the geometric data for plotting
         self.materials = {}
         
         # Auto-create base layer
@@ -47,22 +48,26 @@ class Domain:
             y_bottom = y_top
         return domain
     
-    def add_region(self, name: str, mask_function: Callable):
+    def add_region(self, name: str, mask_function: Callable, metadata: Dict = None):
         """
         Define region using mask function that operates on node coordinates
         mask_function: (x: float, y: float) -> bool
         """
         mask = np.array([mask_function(x, y) for x, y in self.coords], dtype=bool)
         self.regions[name] = mask
+        if metadata:
+            self.region_metadata[name] = metadata
         return self
     
     def add_layer(self, name: str, y_bottom: float, y_top: float):
         self.add_region(name, lambda x, y: y_bottom <= y <= y_top)
-        return self
+        meta_data = {'type': 'layer', 'x_bounds': (0, self.Lx), 'y_bounds': (y_bottom, y_top)}
+        return self.add_region(name, lambda x, y: y_bottom <= y <= y_top, metadata=meta_data)
     
     def add_rectangle(self, name: str, x_min: float, x_max: float, y_min: float, y_max: float):
         self.add_region(name, lambda x, y: x_min <= x <= x_max and y_min <= y <= y_max)
-        return self
+        meta_data = {'type': 'rectangle', 'x_bounds': (x_min, x_max), 'y_bounds': (y_min, y_max)}
+        return self.add_region(name, lambda x, y: x_min <= x <= x_max and y_min <= y <= y_max, metadata=meta_data)
     
     def add_polygon(self, name: str, vertices: List[Tuple[float, float]]):
         """Point-in-polygon test"""
@@ -83,19 +88,16 @@ class Domain:
                             if p1x == p2x or x <= xinters:
                                 inside = not inside
                 p1x, p1y = p2x, p2y
-            return inside
+            meta_data = {'type': 'polygon', 'vertices': np.array(vertices)}
+            return self.add_region(name, point_in_polygon, metadata=meta_data)
         
         self.add_region(name, point_in_polygon)
         return self
     
     def assign(self, region_name: str, material):
-        """Assign material (HydraulicModel, Ks) to region"""
         if region_name not in self.regions:
             raise ValueError(f"Region '{region_name}' not in domain")
-        
-        # Automatically set UFL mode on material to match domain
         material.set_UFL_mode(self.use_UFL)
-        
         self.materials[region_name] = material
         return self
     

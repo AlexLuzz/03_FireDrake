@@ -13,9 +13,9 @@ def main():
     # ==========================================
     config = SimulationConfig(
         project_name="Test",
-        user="alexi", # alexi or AQ96560
+        user="AQ96560", # alexi or AQ96560
         start_datetime=datetime(2024, 4, 15),
-        end_datetime=datetime(2024, 6, 30),
+        end_datetime=datetime(2024, 4, 17),
         dt_td=timedelta(hours=3)
     )
     
@@ -104,40 +104,10 @@ def main():
     # 11. VISUALIZATION
     # ==========================================
     now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    with HydrogeoSimulationReport("results.pdf", config, domain, probe_manager) as report:
+        report.build()
     
-    plotter = ResultsPlotter(
-        config,
-        probe_manager, 
-        rain_scenario, 
-        domain,
-        snapshot_manager,
-        bc_manager
-    )
-    
-    # Configure what to plot
-    plotting_config = {
-        'time_series_fields': ['water_table'],      # Water table elevation
-        'plot_comsol_comparison': True,            # Set to True to use default COMSOL file
-        'plot_measured_comparison': True,          # Set to True to use default measured file
-        'plot_snapshots': True,                     # Snapshot plots if data available
-        'snapshot_fields': ['saturation'],         # Fields to show in snapshots
-    }
-    
-    # Optional: Override defaults if needed
-    # plotting_config.update({
-    #     'comsol_data_file': 'path/to/other/comsol.csv',
-    #     'comsol_ref_date': datetime(2024, 3, 1),
-    #     'measured_data_file': 'path/to/other/measured.csv', 
-    #     'measured_offsets': {"LTC 101": 0.5, "LTC 102": 0.6, "LTC 103": 0.4},
-    # })
-    """
-    plotter.plot_complete_results(
-        filename=config.output_dir / f'rain_simulation_{now}.png',
-        plotting_config=plotting_config
-    )
-    """
-    config.get_sim_duration()
-    report = RichardsReport(plotter).print()
+    print(config.get_sim_duration())
 
 if __name__ == "__main__":
     main()

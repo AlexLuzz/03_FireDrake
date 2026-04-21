@@ -50,6 +50,28 @@ class SoilParameters:
         )
     
     @classmethod
+    def till_BB(cls):
+        """Till soil (glacial deposit)"""
+        return cls(
+            name="Till_BB",
+            Ks=9e-6,          # Very low permeability
+            porosity=0.14,
+            theta_r=0.01,
+            bulk_density=2200.0   # Dense material
+        )
+    
+    @classmethod
+    def terreau_BB(cls):
+        """Terreau (green infrastructure soil)"""
+        return cls(
+            name="Terreau_BB",
+            Ks=4e-7,          # Medium permeability
+            porosity=0.4,
+            theta_r=0.02,
+            bulk_density=1200.0   # Light material
+        )
+    
+    @classmethod
     def sand(cls):
         """Sandy soil"""
         return cls(

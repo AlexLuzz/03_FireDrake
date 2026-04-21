@@ -71,9 +71,7 @@ from .tools import (
 
 # Visualization
 from .visualization import (
-    ResultsPlotter,
-    BasicPlotting,
-    RichardsReport
+    HydrogeoSimulationReport
 )
 
 # World
@@ -134,9 +132,7 @@ __all__ = [
     'load_measured_data',
 
     # Visualization
-    'ResultsPlotter',
-    'BasicPlotting',
-    'RichardsReport',
+    'HydrogeoSimulationReport',
 
     # World
     'Domain',
