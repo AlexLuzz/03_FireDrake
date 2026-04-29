@@ -17,9 +17,6 @@ class MaterialField:
         print(domain)
 
         self.V = function_space
-        self.use_UFL = self.domain.use_UFL
-
-        self.domain.prepare_for_symbolic_mode(function_space)
         
     def _compute_field(self, state_functions, property_func):
         """
@@ -37,56 +34,26 @@ class MaterialField:
         else:
             state_list = [state_functions]
         
+        field_data = field.dat.data
         
-        if self.use_UFL:
-            # ========================================
-            # SYMBOLIC PATH: Preserve UFL structure
-            # ========================================
-            
-            # Build piecewise expression using region indicators
-            field_expr = Constant(0.0)  # Default value
-            
-            for region_name, material in self.domain.materials.items():
-                # Get pre-computed indicator Function
-                indicator = self.domain.region_indicators[region_name]
-                
-                # Compute property value for this material
-                if state_list:
-                    val = property_func(material, *state_list)
-                else:
-                    val = property_func(material)
-                
-                # Build: field_expr = indicator * val + (1 - indicator) * field_expr
-                # This accumulates each region's contribution
-                field_expr = indicator * val + (1.0 - indicator) * field_expr
-            
-            # Assign the complete symbolic expression ONCE
-            field.interpolate(field_expr)
+        if state_list:
+            # Extract numpy arrays from Functions
+            state_data_list = [
+                sf.dat.data_ro if isinstance(sf, Function) else sf 
+                for sf in state_list
+            ]
         
-        else:
-            # ========================================
-            # NUMERIC PATH: Fast numpy operations
-            # ========================================
-            field_data = field.dat.data
+        for region_name, material in self.domain.materials.items():
+            mask = self.domain.regions[region_name]
             
-            if state_list:
-                # Extract numpy arrays from Functions
-                state_data_list = [
-                    sf.dat.data_ro if isinstance(sf, Function) else sf 
-                    for sf in state_list
-                ]
-            
-            for region_name, material in self.domain.materials.items():
-                mask = self.domain.regions[region_name]
-                
-                if not state_list:
-                    # Static property
-                    field_data[mask] = property_func(material)
-                else:
-                    # Dynamic property (depends on state)
-                    field_data[mask] = np.vectorize(
-                        lambda *states: float(property_func(material, *states))
-                    )(*[sd[mask] for sd in state_data_list])
+            if not state_list:
+                # Static property
+                field_data[mask] = property_func(material)
+            else:
+                # Dynamic property (depends on state)
+                field_data[mask] = np.vectorize(
+                    lambda *states: float(property_func(material, *states))
+                )(*[sd[mask] for sd in state_data_list])
         
         return field
 

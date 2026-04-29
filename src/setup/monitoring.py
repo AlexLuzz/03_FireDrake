@@ -220,24 +220,9 @@ class SnapshotManager:
         return False
     
     def record(self, t: float, field, field_name: str = "field", verbose: bool = True):
-        """
-        Record a field snapshot (GENERIC)
-        
-        Parameters:
-        -----------
-        t : float
-            Time [s]
-        field : Firedrake Function
-            Any field to snapshot
-        field_name : str
-            Name for this field
-        """
         if t not in self.snapshots:
             self.snapshots[t] = {}
-        
         self.snapshots[t][field_name] = field.copy(deepcopy=True)
-        
-        # Print stats
         vals = field.dat.data_ro
         if verbose:
             print(f"  Snapshot at t={t/3600:.2f}h | {field_name}: [{vals.min():.3f}, {vals.max():.3f}]")

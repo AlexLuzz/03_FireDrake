@@ -1,13 +1,13 @@
 from firedrake import (
     Function, TrialFunction, TestFunction, dx, ds, lhs, rhs, solve,
-    as_vector, grad, dot, SpatialCoordinate, conditional, min_value,
-    NonlinearVariationalSolver, NonlinearVariationalProblem
+    as_vector, grad, dot, SpatialCoordinate
 )
 
 from ..tools.tools import loading_bar
 
 class RichardsSolver:
-    def __init__(self, V, field_map, source_scenario, bc_manager, config, verbose=True):
+    def __init__(self, V, field_map, source_scenario, bc_manager, config, 
+                 probe_manager, snapshot_manager, verbose=True):
         
         self.field_map = field_map
         self.domain = self.field_map.domain
@@ -17,6 +17,10 @@ class RichardsSolver:
         self.source_scenario = source_scenario
         self.bc_manager = bc_manager
         self.config = config
+
+        self.probe_manager = probe_manager
+        self.snapshot_manager = snapshot_manager
+
         self.verbose = verbose
         self.max_ponding_flux = 1e-6
         self.Se_cutoff = 0.95
@@ -94,6 +98,9 @@ class RichardsSolver:
             print("Starting simulation...")
             print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
         
+        probe_manager = probe_manager or self.probe_manager
+        snapshot_manager = snapshot_manager or self.snapshot_manager
+
         # Record initial conditions (t=0)
         if probe_manager is not None:
             probe_manager.record(0.0, self.p_n, "water_table")

@@ -1,39 +1,87 @@
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from scipy.interpolate import LinearNDInterpolator
 import numpy as np
+from typing import Callable, List, Tuple, Dict
+import matplotlib.dates as mdates
 
-def plot_timeseries(ax, times, data, ylabel="water level (m)", **plot_kwargs):
-    ax.plot(times, data, **plot_kwargs)
+def plot_timeseries(ax, data_dict, field, rain_events=None, use_datetime=True):
+    times = data_dict["times"]
 
+    for name, probe in data_dict["data"].items():
+        ax.plot(times, probe[field], lw=2, label=name)
 
-    return ax
+    if rain_events:
+        ax_rain = ax.twinx()
+        _plot_rain(ax_rain, rain_events, use_datetime)
+    else:
+        ax_rain = None
 
-def plot_domain(ax, domain):
-    # Iterate through metadata to draw patches
-    for name, meta in domain.region_metadata.items():
-        if meta['type'] in ['layer', 'rectangle']:
-            x0, x1 = meta['x_bounds']
-            y0, y1 = meta['y_bounds']
-            ax.add_patch(mpatches.Rectangle((x0, y0), x1-x0, y1-y0, label=name, alpha=0.5))
-        
-        elif meta['type'] == 'polygon':
-            ax.add_patch(mpatches.Polygon(meta['vertices'], label=name, alpha=0.5))
-            
-    ax.set_xlim(0, domain.Lx)
-    ax.set_ylim(0, domain.Ly)
-    ax.legend()
+    _format_time_axis(ax, use_datetime)
 
-def plot_snapshot(ax, x, y, z, title="", cmap="viridis", vmin=0, vmax=1):
-    """Draws a spatial contour of the domain."""
-    xi = np.linspace(x.min(), x.max(), 200)
-    yi = np.linspace(y.min(), y.max(), 100)
-    Xi, Yi = np.meshgrid(xi, yi)
+    ax.set_ylabel(field)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper left")
+
+def _format_time_axis(ax, use_datetime):
+    if use_datetime:
+        loc = mdates.AutoDateLocator()
+        ax.xaxis.set_major_locator(loc)
+        ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
+        ax.figure.autofmt_xdate()
+    else:
+        ax.set_xlabel("Time (hours)")
+
+def _plot_rain(ax, events, use_datetime):
+    t, r = [], []
+
+    for e in sorted(events, key=lambda x: x.start):
+        t0 = e.start_datetime if use_datetime else e.start / 3600
+        t1 = e.end_datetime if use_datetime else e.end / 3600
+
+        t += [t0, t1]
+        r += [e.rate, e.rate]
+
+    if t:
+        t.append(t[-1])
+        r.append(0)
+
+        ax.fill_between(t, 0, r, step="post", alpha=0.3)
+        ax.plot(t, r, drawstyle="steps-post", lw=1.5, label="Rain")
     
-    interp = LinearNDInterpolator(np.column_stack((x, y)), z)
-    Zi = np.clip(interp(Xi, Yi), vmin, vmax)
+    ax.set_ylabel("Rain (mm)")
+    ax.set_ylim(bottom=0)
+
+def plot_snapshot(ax, field, cfg, vmin=None, vmax=None, add_colorbar=False):
+
+    mesh = field.function_space().mesh()
+    coords = mesh.coordinates.dat.data
+    values = field.dat.data
+
+    triang = tri.Triangulation(coords[:, 0], coords[:, 1])
+
+    if vmin is None or vmax is None:
+        vmin, vmax = values.min(), values.max()
+
+    cf = ax.tricontourf(triang, values,
+                        levels=cfg.contour_levels,
+                        cmap=cfg.colormap,
+                        norm=norm)
+
+    ax.set_aspect("equal")
+    ax.set(xlabel="x (m)", ylabel="y (m)")
+
+    if add_colorbar:
+        plt.colorbar(cf, ax=ax, label=f"{cfg.label} ({cfg.units})")
+
+    return cf
+
+
     
-    cf = ax.contourf(Xi, Yi, Zi, levels=11, cmap=cmap, vmin=vmin, vmax=vmax, extend='both')
-    ax.set_aspect('equal')
-    ax.set_title(title)
-    return cf  # Return contour object in case the caller wants to add a colorbar
+def add_probe_markers(ax, probe_positions: List[Tuple], colors: List[str] = None):
+    if colors is None:
+        base_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        colors = [base_colors[i % len(base_colors)] for i in range(len(probe_positions))]
+    
+    for i, (x, y) in enumerate(probe_positions):
+        ax.plot(x, y, '*', color=colors[i % len(colors)],
+                markersize=12, markeredgecolor='black', markeredgewidth=0.8)

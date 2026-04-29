@@ -2,9 +2,6 @@ from datetime import datetime, timedelta
 from firedrake import FunctionSpace
 from src import *
 from firedrake import *
-from pyadjoint import pause_annotation
-
-pause_annotation()
 
 def main():
     """Main simulation with new architecture"""
@@ -15,10 +12,9 @@ def main():
         project_name="Test",
         user="AQ96560", # alexi or AQ96560
         start_datetime=datetime(2024, 4, 15),
-        end_datetime=datetime(2024, 4, 17),
+        end_datetime=datetime(2024, 4, 20),
         dt_td=timedelta(hours=3)
     )
-    
     # ==========================================
     # 2. RAIN SCENARIO
     # ==========================================
@@ -92,20 +88,21 @@ def main():
         field_map=field_map,
         source_scenario=rain_scenario,
         bc_manager=bc_manager,
-        config=config
+        config=config,
+        probe_manager=probe_manager,
+        snapshot_manager=snapshot_manager
     )
     
     # ==========================================
     # 10. RUN
     # ==========================================
-    solver.run(probe_manager, snapshot_manager)
+    solver.run()
     
     # ==========================================
     # 11. VISUALIZATION
     # ==========================================
     now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    with HydrogeoSimulationReport("results.pdf", config, domain, probe_manager) as report:
-        report.build()
+    HydrogeoSimulationReport.print(solver, "prout.pdf")
     
     print(config.get_sim_duration())
 

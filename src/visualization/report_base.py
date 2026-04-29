@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from contextlib import contextmanager
 
 class ReportBase(ABC):
-    def __init__(self, filename):
+    def __init__(self, filename="results.pdf"):
         self.filename = filename
         self.pdf = None
         self._current_figs = []

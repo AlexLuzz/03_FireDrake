@@ -4,7 +4,7 @@ Setup module: Configuration, rain scenarios, and monitoring
 
 from .config import SimulationConfig
 from .source_term import SourceScenario, Zone, rainfall_scenario
-from .monitoring import ProbeManager, SnapshotManager
+from .monitoring import ProbeManager, SnapshotManager #SimulationMonitor
 
 __all__ = [
     'SimulationConfig',
@@ -12,5 +12,6 @@ __all__ = [
     'Zone',
     'ProbeManager',
     'SnapshotManager',
+    #'SimulationMonitor',
     'rainfall_scenario',
 ]

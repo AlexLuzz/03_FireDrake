@@ -1,7 +1,3 @@
-"""
-Configuration module for Richards equation simulation
-Contains domain geometry, time stepping, and solver parameters
-"""
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import  Optional
@@ -70,10 +66,10 @@ class SimulationConfig:
         # Calculate number of steps
         self.num_steps = int(self.t_end / self.dt)
         
-        # Create output directory
-        self.paths = ProjectPaths(user=self.user, 
-                                  project_name=self.project_name 
-                                  )
+        # Initialize project paths
+        self.paths = ProjectPaths(user=self.user, project_name=self.project_name)
+        
+        # Final output destination
         self.output_dir = self.paths.OUTPUT_DIR
         
         # Print configuration summary
