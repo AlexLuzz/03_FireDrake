@@ -45,9 +45,7 @@ from .physics import (
 # Setup and configuration
 from .setup import (
     SimulationConfig,
-    SourceScenario,
-    Zone,
-    rainfall_scenario,
+    SourceManager,
     ProbeManager,
     SnapshotManager,
     #SimulationMonitor
@@ -65,7 +63,7 @@ from .solver import (
 from .tools import (
     CSVLoader,
     TimeConverter,
-    fetch_rainfall_meteostat,
+    fetch_weather_data,
     import_results,
     load_measured_data
 )
@@ -113,9 +111,7 @@ __all__ = [
     
     # Setup
     'SimulationConfig',
-    'SourceScenario',
-    'Zone',
-    'rainfall_scenario',
+    'SourceManager',
     'ProbeManager',
     'SnapshotManager',
 
@@ -128,7 +124,7 @@ __all__ = [
     # Tools
     'CSVLoader',
     'TimeConverter',
-    'fetch_rainfall_meteostat',
+    'fetch_weather_data',
     'import_results',
     'load_measured_data',
 

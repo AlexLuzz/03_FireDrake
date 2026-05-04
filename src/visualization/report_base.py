@@ -31,10 +31,13 @@ class ReportBase(ABC):
         margins=None,
     ):
         figsize = (11.69, 8.27) if landscape else (8.27, 11.69)
-
         fig = plt.figure(figsize=figsize)
 
-        margins = margins or dict(left=0.08, right=0.95, top=0.95, bottom=0.07)
+        if margins is None:
+            if landscape:
+                margins = dict(left=0.06, right=0.97, top=0.92, bottom=0.10)
+            else:
+                margins = dict(left=0.08, right=0.95, top=0.95, bottom=0.07)
 
         gs = fig.add_gridspec(
             nrows=rows,

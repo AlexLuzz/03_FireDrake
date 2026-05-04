@@ -14,8 +14,8 @@ from .time_converter import TimeConverter
 from ..setup.paths import ProjectPaths
     
 # Default data file paths (edit these as needed)
-DEFAULT_COMSOL_FILE = ProjectPaths().RAF_COMSOL_PZ_CG
-DEFAULT_MEASURED_FILE = ProjectPaths().MEASURED_PZ_CG
+DEFAULT_COMSOL_FILE = ProjectPaths(user="alexi").RAF_COMSOL_PZ_CG
+DEFAULT_MEASURED_FILE = ProjectPaths(user="alexi").MEASURED_PZ_CG
 DEFAULT_COMSOL_REF_DATE = datetime(2024, 2, 22)  # COMSOL t=0 reference date
 
 DEFAULT_MEASURED_OFFSETS = {

@@ -42,7 +42,7 @@ class HydrogeoSimulationReport(ReportBase):
     def _page_timeseries(self):
         fig, gs = self.create_page(rows=1, cols=1, landscape=True)
         ax = fig.add_subplot(gs[:,:])
-        plot_timeseries(ax, self.probes.get_data(), 'water_table', self.scenario.events)
+        plot_timeseries(ax, self.probes.get_data(), 'water_table', self.scenario)
 
     def _page_images(self):
         fig, gs = self.create_page(rows=1, cols=1, landscape=True)

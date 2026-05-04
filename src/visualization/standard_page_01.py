@@ -12,7 +12,7 @@ def add_config_text(ax, config, domain):
         ("Time Step", f"{config.dt:.1f} s"),
         ("Domain", f"{domain.Lx} × {domain.Ly} m"),
         ("Mesh", f"{domain.nx} × {domain.ny}"),
-        ("Real time", config.real_time_duration),
+        ("Real time", config.get_sim_duration()),
     ]
 
     ax.text(0.1, 0.95, "SIMULATION CONFIGURATION",

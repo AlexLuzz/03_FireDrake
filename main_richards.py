@@ -10,7 +10,7 @@ def main():
     # ==========================================
     config = SimulationConfig(
         project_name="Test",
-        user="AQ96560", # alexi or AQ96560
+        user="alexi", # alexi or AQ96560
         start_datetime=datetime(2024, 4, 15),
         end_datetime=datetime(2024, 4, 20),
         dt_td=timedelta(hours=3)
@@ -18,22 +18,35 @@ def main():
     # ==========================================
     # 2. RAIN SCENARIO
     # ==========================================
-    rain_zones = [
-        {'name': 'grass', 'x_min': 0.0, 'x_max': 8.0, 'multiplier': 1.0},
-        {'name': 'green_infrastructure', 'x_min': 9.0, 'x_max': 11.0, 'multiplier': 6.0},
-    ]
-    
-    rain_scenario = rainfall_scenario(
-        from_date=config.start_datetime,
-        to_date=config.end_datetime,
-        # From CSV file (need to specify path and rain unit)
-        csv_path=config.paths.RAF_METEO,
-        rain_unit="mm/day",
-        # From Meteostat (uncomment to use)
-        #meteostat_station='SOK6B',
-        #meteostat_agg_hours=int(config.dt_hours),
-        zones=rain_zones
+    zones = {
+    'grass': {
+        'bounds': (0.0, 8.0),  # (x_min, x_max)
+        'data_col': 'rain',    # Key to look up in the internal DataFrame
+        'factor': 1.0          # The old 'multiplier'
+    },
+    'green_infrastructure': {
+        'bounds': (9.0, 11.0),
+        'data_col': 'rain',
+        'factor': 6.0          # Applied during UFL construction
+    }
+    }
+
+    # 2. Initialize the Manager
+    # The config already contains your start/end dates and paths[cite: 2]
+    source_mgr = SourceManager(config, zones)
+
+    # 3. Import Data (Choose one method)
+
+    # Option A: Import from CSV 
+    # IMPORTANT: The new import_csv assumes values are already in SI units (m/s)[cite: 1]
+    source_mgr.import_csv(
+        filepath=config.paths.RAF_METEO,
+        datetime_col='Date' # Ensure this matches your CSV header
     )
+
+    # Option B: Fetch directly from Meteostat
+    # This handles the unit conversion from mm/day to m/s automatically[cite: 1]
+    # source_mgr.import_weather_data(config.start_datetime, config.end_datetime)
 
     
     # ==========================================
@@ -62,7 +75,6 @@ def main():
                                           right_wt=1.2,
                                           #left_trend=(config.end_datetime, 0.5),
                                           #right_trend=(config.end_datetime, 1.1),
-                                          time_converter=config.time_converter
                                           )
 
     # ==========================================
@@ -86,7 +98,7 @@ def main():
     solver = RichardsSolver(
         V=V,
         field_map=field_map,
-        source_scenario=rain_scenario,
+        source_scenario=source_mgr,
         bc_manager=bc_manager,
         config=config,
         probe_manager=probe_manager,
