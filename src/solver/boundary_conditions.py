@@ -5,7 +5,7 @@ from firedrake import DirichletBC, Function
 
 class BoundaryConditionManager:
     def __init__(self, V, left_wt=1.2, right_wt=None, 
-                 left_trend=None, right_trend=None, time_converter=None):
+                 left_trend=None, right_trend=None):
         """
         Args:
             V: Function space
@@ -34,7 +34,6 @@ class BoundaryConditionManager:
         """
         self.V = V
         self.mesh = V.mesh()
-        self.time_converter = time_converter
         self.y_coords = self.mesh.coordinates.dat.data[:, 1]
         
         # Set up left boundary

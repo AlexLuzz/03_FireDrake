@@ -7,7 +7,7 @@ from ..tools.tools import loading_bar
 
 class RichardsSolver:
     def __init__(self, V, field_map, source_scenario, bc_manager, config, 
-                 probe_manager, snapshot_manager, verbose=True):
+                 monitoring, verbose=True):
         
         self.field_map = field_map
         self.domain = self.field_map.domain
@@ -17,9 +17,7 @@ class RichardsSolver:
         self.source_scenario = source_scenario
         self.bc_manager = bc_manager
         self.config = config
-
-        self.probe_manager = probe_manager
-        self.snapshot_manager = snapshot_manager
+        self.monitoring = monitoring
 
         self.verbose = verbose
         self.max_ponding_flux = 1e-6
@@ -35,10 +33,7 @@ class RichardsSolver:
         water_table = self.bc_manager.left_wt_0
         coords_ufl = SpatialCoordinate(self.mesh)
         
-        # Use UFL expression to keep on adjoint tape
         pressure_expr = water_table - coords_ufl[1]
-        
-        # Interpolate keeps the dependency on water_table in the tape
         self.p_n.interpolate(pressure_expr)
     
     def _get_solver_parameters(self):
@@ -69,7 +64,7 @@ class RichardsSolver:
         
         bcs = self.bc_manager.get_dirichlet_bcs(t)
         rain_flux = -self.source_scenario.get_flux_expression(t, self.mesh)
-        
+
         #Se = self.field_map.get_Se_field(self.p_n)
         #rain_flux = conditional(Se >= 0.95, min_value(rain_flux_base, self.max_ponding_flux),
         #    rain_flux_base)
@@ -93,38 +88,21 @@ class RichardsSolver:
         
         self.p_n.assign(self.p_new)
     
-    def run(self, probe_manager=None, snapshot_manager=None):
+    def run(self):
         if self.verbose:
             print("Starting simulation...")
             print(f"Duration: {self.config.t_end/3600:.1f} hours with dt={self.config.dt}s")
         
-        probe_manager = probe_manager or self.probe_manager
-        snapshot_manager = snapshot_manager or self.snapshot_manager
-
-        # Record initial conditions (t=0)
-        if probe_manager is not None:
-            probe_manager.record(0.0, self.p_n, "water_table")
-            #probe_manager.record_water_table(0.0, self.p_n)
-        if snapshot_manager is not None:
-            if snapshot_manager.should_record(0.0, self.config.dt):
-                Se = self.field_map.get_Se_field(self.p_n)
-                snapshot_manager.record(0.0, Se, "saturation", verbose=False)
+        self.monitoring.record_probe(0.0, self.p_n, "water_table")
+        self.monitoring.check_and_record_snapshot(0.0, self.config.dt, self.field_map.get_Se_field(self.p_n), "saturation")
 
         t = 0.0
         for step in range(self.config.num_steps):
             t += self.config.dt
             self.solve_timestep(t)
             
-            # Record probes (generic + specialized)
-            if probe_manager is not None:
-                probe_manager.record(t, self.p_new, "water_table")
-                #probe_manager.record_water_table(t, self.p_new)
-            
-            # Record snapshots
-            if snapshot_manager is not None:
-                if snapshot_manager.should_record(t, self.config.dt):
-                    Se = self.field_map.get_Se_field(self.p_new)
-                    snapshot_manager.record(t, Se, "saturation", verbose=False)
+            self.monitoring.record_probe(t, self.p_new, "water_table")
+            self.monitoring.check_and_record_snapshot(t, self.config.dt, self.field_map.get_Se_field(self.p_new), "saturation")
 
             # Loading bar
             if self.verbose:

@@ -1,187 +1,114 @@
-"""
-Dead simple CSV loader with datetime handling
-"""
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import Optional, List, Literal
+from typing import Optional, Literal, Union
 
-
-class CSVLoader:
-    """Load CSV with smart delimiter/datetime detection"""
+def load_csv(filepath: str, datetime_col: Optional[str] = None) -> pd.DataFrame:
+    """Load CSV with auto-delimiter detection and smart datetime parsing."""
+    # Auto-detect delimiter (checking the first line)
+    with open(filepath, 'r', encoding='utf-8-sig') as f:
+        first_line = f.readline()
+        delimiter = ';' if ';' in first_line else ','
     
-    def __init__(self, filepath: str, datetime_col: Optional[str] = None):
-        self.filepath = filepath
-        self.datetime_col = datetime_col
-        self.df = self._load(datetime_col)
+    # Load and clean column names
+    df = pd.read_csv(filepath, delimiter=delimiter, encoding='utf-8-sig')
+    df.columns = df.columns.str.strip()
     
-    def _load(self, datetime_col: Optional[str]) -> pd.DataFrame:
-        # Auto-detect delimiter
-        with open(self.filepath, 'r', encoding='utf-8-sig') as f:
-            delimiter = ';' if ';' in f.readline() else ','
-        
-        # Load and clean
-        df = pd.read_csv(self.filepath, delimiter=delimiter, encoding='utf-8-sig')
-        df.columns = df.columns.str.strip()
-        
-        # Parse datetime if specified
-        if datetime_col and datetime_col in df.columns:
-            # Try different datetime parsing strategies
-            try:
-                # First try automatic inference (pandas 2.0+ handles this automatically)
-                df[datetime_col] = pd.to_datetime(df[datetime_col])
-            except:
+    if datetime_col and datetime_col in df.columns:
+        # Strategy 1: Fast pandas inference
+        try:
+            df[datetime_col] = pd.to_datetime(df[datetime_col], dayfirst=True)
+        except (ValueError, TypeError):
+            # Strategy 2: Explicit common formats
+            formats = ['%Y-%m-%d', '%d/%m/%Y', '%d/%m/%Y %H:%M', '%Y-%m-%d %H:%M']
+            for fmt in formats:
                 try:
-                    # Try with dayfirst=True for European formats
-                    df[datetime_col] = pd.to_datetime(df[datetime_col], dayfirst=True)
-                except:
-                    try:
-                        # Try common formats explicitly
-                        formats_to_try = [
-                            '%Y-%m-%d',        # 2024-01-01
-                            '%d/%m/%Y',        # 01/01/2024  
-                            '%d/%m/%Y %H:%M',  # 01/01/2024 12:00
-                            '%Y-%m-%d %H:%M'   # 2024-01-01 12:00
-                        ]
-                        parsed = False
-                        for fmt in formats_to_try:
-                            try:
-                                df[datetime_col] = pd.to_datetime(df[datetime_col], format=fmt)
-                                parsed = True
-                                break
-                            except:
-                                continue
-                        if not parsed:
-                            raise ValueError(f"Could not parse datetime column '{datetime_col}'")
-                    except Exception as e:
-                        raise ValueError(f"Failed to parse datetime column '{datetime_col}': {e}")
-            
-            df = df.set_index(datetime_col).sort_index()
+                    df[datetime_col] = pd.to_datetime(df[datetime_col], format=fmt)
+                    break
+                except (ValueError, TypeError):
+                    continue
         
-        return df
+        df = df.set_index(datetime_col).sort_index()
     
-    def filter_dates(self, start: Optional[datetime] = None, 
-                     end: Optional[datetime] = None):
-        """Filter by date range (requires datetime_col set at init)"""
-        if not isinstance(self.df.index, pd.DatetimeIndex):
-            raise ValueError("DataFrame must have datetime index (set datetime_col at init)")
-        
-        if start:
-            self.df = self.df[self.df.index >= start]
-        if end:
-            self.df = self.df[self.df.index <= end]
-        
-        if self.df.empty:
-            raise ValueError(f"No data between {start} and {end}")
-        
-        return self
+    return df
+
+def filter_dates(df: pd.DataFrame, start: Optional[datetime] = None, end: Optional[datetime] = None) -> pd.DataFrame:
+    """Filter DataFrame by a date range."""
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("DataFrame index must be a DatetimeIndex.")
     
-    def align(self, freq: str, method: Literal['ffill', 'bfill', 'interpolate'] = 'interpolate'):
-        """
-        Resample to regular intervals
+    mask = pd.Series(True, index=df.index)
+    if start:
+        mask &= (df.index >= start)
+    if end:
+        mask &= (df.index <= end)
         
-        Args:
-            freq: pandas frequency string ('h'=hourly, 'D'=daily, '15min', etc.)
-            method: 'ffill' (forward fill), 'bfill' (backward fill), 'interpolate' (linear)
-        
-        Example:
-            loader.align('h')  # Hourly intervals with linear interpolation
-            loader.align('D', 'ffill')  # Daily with forward fill
-        """
-        if not isinstance(self.df.index, pd.DatetimeIndex):
-            raise ValueError("DataFrame must have datetime index (set datetime_col at init)")
-        
-        # Resample to regular frequency
-        df_resampled = self.df.resample(freq)
-        
-        if method == 'interpolate':
-            self.df = df_resampled.interpolate(method='linear')
-        elif method == 'ffill':
-            self.df = df_resampled.ffill()
-        elif method == 'bfill':
-            self.df = df_resampled.bfill()
-        else:
-            raise ValueError(f"Unknown method: {method}")
-        
-        return self
+    filtered_df = df[mask]
+    if filtered_df.empty:
+        print(f"Warning: No data found between {start} and {end}")
+    return filtered_df
+
+def align_data(df: pd.DataFrame, freq: str, method: Literal['ffill', 'bfill', 'interpolate'] = 'interpolate') -> pd.DataFrame:
+    """Resample data to a fixed frequency (e.g., '1h', '15min')."""
+    resampler = df.resample(freq)
     
-    def smooth(self, window: int, method: Literal['mean', 'median'] = 'mean'):
-        """
-        Smooth data with rolling window
+    if method == 'interpolate':
+        return resampler.interpolate(method='linear')
+    return getattr(resampler, method)()
+
+def smooth_data(df: pd.DataFrame, window: int, method: Literal['mean', 'median'] = 'mean') -> pd.DataFrame:
+    """Apply a rolling window smoothing."""
+    rolling = df.rolling(window=window, center=True, min_periods=1)
+    return getattr(rolling, method)()
+
+def apply_hampel_filter(series: pd.Series, window_size: int = 5, n_sigma: float = 3.0) -> pd.Series:
+    """Detect and replace outliers with the local median."""
+    # Convert to numeric if it's a string/comma-decimal format
+    if series.dtype == object:
+        series = pd.to_numeric(series.astype(str).str.replace(',', '.'), errors='coerce')
         
-        Args:
-            window: number of points in rolling window
-            method: 'mean' or 'median'
-        
-        Example:
-            loader.smooth(3)  # 3-point moving average
-            loader.smooth(5, 'median')  # 5-point median filter
-        """
-        if method == 'mean':
-            self.df = self.df.rolling(window, center=True, min_periods=1).mean()
-        elif method == 'median':
-            self.df = self.df.rolling(window, center=True, min_periods=1).median()
-        else:
-            raise ValueError(f"Unknown method: {method}")
-        
-        return self
+    filtered = series.copy()
+    L = 1.4826 # Scale factor for Gaussian distribution
     
-    def hampel_filter(self, col: str, window_size: int = 5, n_sigma: float = 3.0):
-        """
-        Remove outliers using Hampel filter (median absolute deviation)
-        
-        Args:
-            col: Column name to filter
-            window_size: Moving window size (must be odd)
-            n_sigma: Threshold in standard deviations
-        
-        Returns:
-            self for method chaining
-        """
-        if col not in self.df.columns:
-            raise ValueError(f"Column '{col}' not found")
-        
-        # Get numeric data
-        values = self.get_numeric(col)
-        filtered = values.copy()
-        half_window = window_size // 2
-        
-        for i in range(half_window, len(values) - half_window):
-            window = values[i - half_window : i + half_window + 1]
-            median = np.median(window)
-            mad = np.median(np.abs(window - median))
-            
-            if mad > 0:  # Avoid division by zero
-                threshold = n_sigma * 1.4826 * mad  # 1.4826 converts MAD to std
-                if np.abs(values[i] - median) > threshold:
-                    filtered[i] = median
-        
-        # Update the dataframe
-        self.df[col] = filtered
-        return self
+    rolling_median = series.rolling(window=window_size, center=True).median()
+    rolling_mad = series.rolling(window=window_size, center=True).apply(lambda x: np.median(np.abs(x - np.median(x))))
     
-    def get_numeric(self, col: str):
-        """Get column as numeric (handles comma decimals)"""
-        if col not in self.df.columns:
-            raise ValueError(f"Column '{col}' not found")
-        
-        values = self.df[col].astype(str).str.replace(',', '.', regex=False)
-        return pd.to_numeric(values, errors='coerce').values
+    lower_bound = rolling_median - (n_sigma * L * rolling_mad)
+    upper_bound = rolling_median + (n_sigma * L * rolling_mad)
     
-    def get_column(self, col: str):
-        """Get column as-is"""
-        return self.df[col].values
+    outliers = (series < lower_bound) | (series > upper_bound)
+    filtered[outliers] = rolling_median[outliers]
+    return filtered
+
+def get_numeric(df: pd.DataFrame, col: str) -> np.ndarray:
+    """Extract a column as a clean numpy float array."""
+    values = df[col].astype(str).str.replace(',', '.', regex=False)
+    return pd.to_numeric(values, errors='coerce').values
+
+# --- EXAMPLE USAGE ---
+if __name__ == "__main__":
+    # 1. Load data
+    # df = load_csv("data.csv", datetime_col="Timestamp")
     
-    def get_datetimes(self):
-        """Get datetime index as array"""
-        if not isinstance(self.df.index, pd.DatetimeIndex):
-            raise ValueError("DataFrame must have datetime index (set datetime_col at init)")
-        return self.df.index.values
+    # Dummy data for demonstration
+    data = {
+        'Timestamp': ['01/01/2024 10:00', '01/01/2024 10:05', '01/01/2024 10:10'],
+        'Value': ['10,5', '100,0', '11,2'] # Includes an outlier and comma decimals
+    }
+    df_demo = pd.DataFrame(data)
+    df_demo['Timestamp'] = pd.to_datetime(df_demo['Timestamp'])
+    df_demo = df_demo.set_index('Timestamp')
+
+    print("Original Data:\n", df_demo)
+
+    # 2. Extracting values (get_... equivalents)
+    vals = get_numeric(df_demo, 'Value')
+    times = df_demo.index.values
+    print(f"\nExtracted Values: {vals}")
+    print(f"Extracted Times: {times[:2]}...")
+
+    # 3. Clean and Filter
+    df_demo['Value'] = apply_hampel_filter(df_demo['Value'])
+    df_filtered = filter_dates(df_demo, start=datetime(2024, 1, 1, 10, 0))
     
-    @property
-    def columns(self):
-        return self.df.columns.tolist()
-    
-    @property
-    def length(self):
-        return len(self.df)
+    print("\nProcessed Data (Outlier removed):\n", df_filtered)

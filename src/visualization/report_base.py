@@ -35,9 +35,9 @@ class ReportBase(ABC):
 
         if margins is None:
             if landscape:
-                margins = dict(left=0.06, right=0.97, top=0.92, bottom=0.10)
+                margins = dict(left=0.05, right=0.95, top=0.96, bottom=0.04)
             else:
-                margins = dict(left=0.08, right=0.95, top=0.95, bottom=0.07)
+                margins = dict(left=0.08, right=0.92, top=0.93, bottom=0.07)
 
         gs = fig.add_gridspec(
             nrows=rows,

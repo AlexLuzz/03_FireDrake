@@ -10,51 +10,13 @@ from pathlib import Path
 from typing import Dict, Optional, Union
 from datetime import datetime
 from .csv_loader import CSVLoader
-from .time_converter import TimeConverter
 from ..setup.paths import ProjectPaths
-    
-# Default data file paths (edit these as needed)
-DEFAULT_COMSOL_FILE = ProjectPaths(user="alexi").RAF_COMSOL_PZ_CG
-DEFAULT_MEASURED_FILE = ProjectPaths(user="alexi").MEASURED_PZ_CG
-DEFAULT_COMSOL_REF_DATE = datetime(2024, 2, 22)  # COMSOL t=0 reference date
 
 DEFAULT_MEASURED_OFFSETS = {
     'LTC 101': 0.0,
     'LTC 102': 0.0, 
     'LTC 103': 0.0,
 }
-
-
-def load_comsol_data(csv_path: Union[str, Path] = None, 
-                     start_from_days: float = 0.0, 
-                     sim_duration_days: Optional[float] = None) -> Dict:
-    """Load COMSOL simulation results"""
-    csv_path = csv_path or DEFAULT_COMSOL_FILE
-    loader = CSVLoader(str(csv_path))
-    
-    # Find time column and load data
-    time_col = next((col for col in loader.columns if 'time' in col.lower() or col.lower() == 't'), None)
-    if not time_col:
-        raise ValueError(f"No time column in {csv_path}")
-    
-    times = loader.get_numeric(time_col) - start_from_days
-    
-    # Filter time range if specified
-    if sim_duration_days:
-        mask = (times >= 0) & (times <= sim_duration_days)
-        if not mask.any():
-            raise ValueError(f"No data in range 0 to {sim_duration_days} days")
-        times = times[mask]
-        loader.df = loader.df[mask]
-    
-    # Extract LTC columns
-    result = {'times': times}
-    result.update({col: loader.get_numeric(col) for col in loader.columns 
-                   if col != time_col and col.upper().startswith('LTC')})
-    
-    print(f"✓ COMSOL: {list(result.keys())} ({len(times)} points)")
-    return result
-
 
 def load_measured_data(csv_path: Union[str, Path] = None,
                       time_converter: TimeConverter = None,
